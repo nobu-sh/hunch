@@ -1,0 +1,16 @@
+[package]
+name = "hunch-eval"
+description = "Offline evaluation CLI for hunch-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+hunch-core.workspace = true
+symphonia = { version = "0.5", features = ["mp3", "aiff"] }
+walkdir = "2"
+
+[dev-dependencies]
+hound = "3"
