@@ -1,0 +1,12 @@
+[workspace]
+resolver = "3"
+members = ["crates/hunch-core", "crates/hunch-wasm", "crates/hunch-eval"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.86"
+
+[workspace.dependencies]
+hunch-core = { path = "crates/hunch-core" }
