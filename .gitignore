@@ -1,0 +1,11 @@
+# Rust
+/target/
+
+# Node / extension
+node_modules/
+/extension/.output/
+/extension/.wxt/
+/extension/src/wasm/pkg/
+
+# Local data (datasets, personal beat set)
+/data/
