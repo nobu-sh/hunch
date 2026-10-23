@@ -1,0 +1,24 @@
+name: PR title
+
+# PRs are squash-merged, so the title becomes the commit title on master.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check "[prefix] description" format
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          echo "Title: $TITLE"
+          if [ "${#TITLE}" -gt 72 ]; then
+            echo "::error::PR title is ${#TITLE} characters; keep it at 72 or fewer."
+            exit 1
+          fi
+          if ! printf '%s' "$TITLE" | grep -Eq '^\[[a-z0-9][a-z0-9/_-]*\] [^ ].*[^.]$'; then
+            echo "::error::PR title must look like '[prefix] short description': lowercase prefix in brackets, no trailing period."
+            exit 1
+          fi
