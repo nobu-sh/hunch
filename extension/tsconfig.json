@@ -1,0 +1,10 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    // Replaces WXT's generated aliases, so `@/*` is repeated here.
+    "paths": {
+      "@/*": ["./src/*"],
+      "@/wasm/pkg/*": ["./src/wasm/pkg/*", "./src/wasm/fallback/*"]
+    }
+  }
+}

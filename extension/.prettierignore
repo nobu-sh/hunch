@@ -1,0 +1,4 @@
+.output/
+.wxt/
+src/wasm/pkg/
+pnpm-lock.yaml
