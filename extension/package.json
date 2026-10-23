@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@11.7.0",
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
@@ -10,6 +11,7 @@
     "postinstall": "wxt prepare",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "wxt prepare && tsc --noEmit",
     "test": "vitest run",
     "build:wasm": "node scripts/build-wasm.mjs"

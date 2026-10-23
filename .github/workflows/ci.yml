@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Must match the wasm-bindgen version pinned in crates/hunch-wasm/Cargo.toml.
+  WASM_BINDGEN_VERSION: 0.2.108
+  NODE_VERSION: 26
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: extension/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: pnpm install --frozen-lockfile
+        working-directory: extension
+      - run: pnpm lint
+        working-directory: extension
+      - run: pnpm format:check
+        working-directory: extension
+      - run: pnpm typecheck
+        working-directory: extension
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: extension/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+      - run: cargo test --workspace
+      - run: pnpm install --frozen-lockfile
+        working-directory: extension
+      - run: pnpm test
+        working-directory: extension
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ env.WASM_BINDGEN_VERSION }}
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: extension/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+      - run: cargo build --workspace --all-targets
+      - run: pnpm install --frozen-lockfile
+        working-directory: extension
+      - run: pnpm build:wasm
+        working-directory: extension
+      - run: pnpm build
+        working-directory: extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hunch-chrome-mv3
+          path: extension/.output/chrome-mv3
+          if-no-files-found: error
