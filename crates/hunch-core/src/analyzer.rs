@@ -13,6 +13,8 @@ pub struct Estimate {
     pub bpm_confidence: f32,
     /// The other likely tempo octave, shown next to `bpm` when the octave call is unsure.
     pub bpm_alternate: Option<f32>,
+    /// Deviation of the audio from A = 440 Hz in cents. `None` when there's no key.
+    pub tuning_cents: Option<f32>,
     pub seconds_analyzed: f32,
 }
 
@@ -62,6 +64,11 @@ impl Analyzer {
         self.samples_since_estimate = 0;
     }
 
+    /// How many more samples `push` needs before it returns the next estimate.
+    pub fn samples_until_estimate(&self) -> u64 {
+        self.samples_per_estimate - self.samples_since_estimate
+    }
+
     /// The estimate for everything pushed so far, regardless of the push cadence.
     pub fn current(&self) -> Estimate {
         self.estimate()
@@ -76,6 +83,7 @@ impl Analyzer {
             bpm: tempo.bpm,
             bpm_confidence: tempo.confidence,
             bpm_alternate: tempo.alternate,
+            tuning_cents: key.key.map(|_| self.key.tuning_cents()),
             seconds_analyzed: self.total_samples as f32 / self.sample_rate as f32,
         }
     }

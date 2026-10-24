@@ -4,7 +4,10 @@ mod analyzer;
 pub mod dsp;
 mod key;
 pub mod rhythm;
+pub mod segment;
+mod session;
 pub mod tonal;
 
 pub use analyzer::{Analyzer, Estimate};
 pub use key::{Key, Mode, PitchClass};
+pub use session::{Session, SessionEvent};
