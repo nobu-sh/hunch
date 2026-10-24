@@ -1,4 +1,5 @@
-//! Key detector parameter sweep: decode each keyed/atonal sound once, run a grid of configs.
+//! Key detector parameter sweep: decode each keyed/atonal sound once, run a grid of configs, and
+//! score every dataset separately.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -8,12 +9,14 @@ use std::time::Instant;
 use clap::Args;
 use hunch_core::tonal::{KeyDetector, KeyDetectorConfig, KeyProfile};
 use hunch_core::{Key, Mode, PitchClass};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::fsl10k::{KeyLabel, Sound, Split};
+use crate::fsl10k::Split;
+use crate::key_corpus::{self, Corpus, CorpusArgs, KeyItem, Window};
 use crate::metrics::{self, AtonalScore, KeyScore};
-use crate::resample::{self, ANALYSIS_SAMPLE_RATE};
-use crate::{DatasetArgs, decode, run};
+use crate::profile_fit::{self, FitSettings, ProfileModel, ProfileSample};
+use crate::resample::ANALYSIS_SAMPLE_RATE;
+use crate::{SplitChoice, run};
 
 const PITCH_CLASSES: u8 = 12;
 const FIFTH_SEMITONES: u8 = 7;
@@ -27,9 +30,13 @@ const INSTRUMENTS: [&str; 6] = ["percussion", "bass", "chords", "melody", "fx", 
 #[derive(Args)]
 pub struct KeySweepArgs {
     #[command(flatten)]
-    dataset: DatasetArgs,
+    corpus: CorpusArgs,
 
-    /// Key profiles to try, comma-separated (krumhanslkessler, temperley, edma, shaath).
+    /// Part of each Beatport/GiantSteps+ track to analyze.
+    #[arg(long, value_enum, default_value = "30s")]
+    window: Window,
+
+    /// Key profiles to try, comma-separated (krumhanslkessler, temperley, edma, shaath, learned).
     #[arg(long, value_delimiter = ',', value_parser = parse_profile)]
     profile: Vec<KeyProfile>,
 
@@ -65,7 +72,7 @@ pub struct KeySweepArgs {
     #[arg(long, default_value_t = 0.15)]
     max_false_key: f64,
 
-    /// Print an error breakdown for the first config at the first threshold.
+    /// Print an error breakdown per dataset for the first config at the first threshold.
     #[arg(long)]
     analyze: bool,
 
@@ -73,6 +80,34 @@ pub struct KeySweepArgs {
     /// (ignores `--split`).
     #[arg(long)]
     calibrate: bool,
+
+    /// Write the first config's outcome for every sound here.
+    #[arg(long)]
+    csv: Option<PathBuf>,
+
+    /// Fit a 24-key profile on train chroma from the first config, once per L2 strength listed
+    /// in `--profile-l2`, and score it on train and val (ignores `--split`).
+    #[arg(long)]
+    fit_profile: bool,
+
+    #[arg(long, value_delimiter = ',', default_values_t = [0.01])]
+    profile_l2: Vec<f64>,
+
+    /// Share of the profile fit's likelihood on the exact key; the rest is on the scale.
+    #[arg(long, value_delimiter = ',', default_values_t = [0.5])]
+    profile_exact_share: Vec<f64>,
+
+    /// Fit the tonic weight along with the profile instead of keeping the config's.
+    #[arg(long)]
+    profile_tonic_weight: bool,
+
+    /// Fit a bias toward minor keys along with the profile.
+    #[arg(long)]
+    profile_minor_bias: bool,
+
+    /// Share of the profile fit's weight on FSL10K; the rest goes to the track datasets.
+    #[arg(long, default_value_t = 0.5)]
+    profile_fsl10k_share: f64,
 }
 
 fn parse_profile(name: &str) -> Result<KeyProfile, String> {
@@ -141,25 +176,29 @@ fn describe(config: &KeyDetectorConfig) -> String {
 
 /// What one config reported for one sound, before the tonalness threshold.
 #[derive(Clone, Copy)]
-struct Outcome {
-    key: Option<Key>,
-    confidence: f32,
-    tonalness: f32,
-    tuning_cents: f32,
-    separation: f32,
-    evidence: f32,
+pub struct Outcome {
+    pub key: Option<Key>,
+    pub confidence: f32,
+    pub tonalness: f32,
+    pub tuning_cents: f32,
+    pub separation: f32,
+    pub clarity: f32,
+    pub evidence: f32,
+    pub chroma: [f32; PITCH_CLASSES as usize],
+    pub bass_chroma: [f32; PITCH_CLASSES as usize],
 }
 
 impl Outcome {
-    fn key_at(&self, threshold: f32) -> Option<Key> {
+    pub fn key_at(&self, threshold: f32) -> Option<Key> {
         self.key.filter(|_| self.tonalness >= threshold)
     }
 }
 
-struct SoundOutcomes {
-    loop_seconds: f32,
+pub struct SoundOutcomes {
+    /// Length of the decoded audio before looping or windowing.
+    pub source_seconds: f32,
     /// One per config, in grid order.
-    outcomes: Vec<Outcome>,
+    pub outcomes: Vec<Outcome>,
 }
 
 fn run_grid(samples: &[f32], grid: &[KeyDetectorConfig]) -> Vec<Outcome> {
@@ -174,58 +213,86 @@ fn run_grid(samples: &[f32], grid: &[KeyDetectorConfig]) -> Vec<Outcome> {
                 tonalness: estimate.tonalness,
                 tuning_cents: detector.tuning_cents(),
                 separation: estimate.separation,
+                clarity: estimate.clarity,
                 evidence: estimate.evidence,
+                chroma: detector.chroma(),
+                bass_chroma: detector.bass_chroma(),
             }
         })
         .collect()
 }
 
-fn analyze_sound(
-    sound: &Sound,
-    min_seconds: f32,
-    grid: &[KeyDetectorConfig],
-) -> Result<SoundOutcomes, String> {
-    let audio = decode::decode_mono(&sound.audio_path)?;
-    let samples = resample::to_analysis_rate(&audio)?;
-    if samples.is_empty() {
-        return Err("no samples".to_string());
-    }
-    let loop_seconds = samples.len() as f32 / ANALYSIS_SAMPLE_RATE as f32;
-    let min_len = (min_seconds.max(0.0) * ANALYSIS_SAMPLE_RATE as f32).ceil() as usize;
-    let samples = resample::repeat_to_length(samples, min_len);
-    Ok(SoundOutcomes {
-        loop_seconds,
-        outcomes: run_grid(&samples, grid),
-    })
-}
-
-struct Scored<'a> {
-    sound: &'a Sound,
-    result: SoundOutcomes,
+pub struct Scored<'a> {
+    pub item: &'a KeyItem,
+    pub result: SoundOutcomes,
 }
 
 impl Scored<'_> {
-    fn label(&self) -> Option<Key> {
-        match self.sound.labels.key {
-            KeyLabel::Key(key) => Some(key),
-            _ => None,
+    pub fn labels(&self) -> Option<&[Key]> {
+        self.item.labels()
+    }
+
+    pub fn is_atonal(&self) -> bool {
+        self.item.is_atonal()
+    }
+}
+
+/// Decodes every item once and runs every config of `grid` on it, dropping the audio afterwards.
+pub fn analyze_items<'a>(
+    items: &'a [KeyItem],
+    window: Window,
+    min_seconds: f32,
+    grid: &[KeyDetectorConfig],
+) -> Vec<Scored<'a>> {
+    let outcomes = run::par_map(items, |item| {
+        let prepared = key_corpus::prepare(item, window, min_seconds)?;
+        Ok(SoundOutcomes {
+            source_seconds: prepared.source_seconds,
+            outcomes: run_grid(&prepared.samples, grid),
+        })
+    });
+    let mut scored = Vec::new();
+    let mut failures = Vec::new();
+    for (item, outcome) in items.iter().zip(outcomes) {
+        match outcome {
+            Ok(result) => scored.push(Scored { item, result }),
+            Err(error) => failures.push((item, error)),
         }
     }
-
-    fn is_atonal(&self) -> bool {
-        self.sound.labels.key == KeyLabel::Atonal
+    for (item, error) in failures.iter().take(crate::MAX_LISTED_FAILURES) {
+        eprintln!(
+            "warning: skipping {} {} ({}): {error}",
+            item.corpus,
+            item.id,
+            item.audio_path.display()
+        );
     }
+    if !failures.is_empty() {
+        println!("skipped {} sounds that failed to decode", failures.len());
+    }
+    scored
 }
 
-struct RowScore {
-    key: KeyScore,
-    atonal: AtonalScore,
+/// The corpora present in `scored`, in order.
+pub fn corpora(scored: &[Scored]) -> Vec<Corpus> {
+    let mut corpora: Vec<Corpus> = scored.iter().map(|entry| entry.item.corpus).collect();
+    corpora.sort();
+    corpora.dedup();
+    corpora
 }
 
-fn score_row(scored: &[&Scored], config_index: usize, threshold: f32) -> RowScore {
-    let key = KeyScore::from_predictions(scored.iter().filter_map(|entry| {
-        let label = entry.label()?;
-        Some((entry.result.outcomes[config_index].key_at(threshold), label))
+pub struct RowScore {
+    pub key: KeyScore,
+    pub atonal: AtonalScore,
+}
+
+pub fn score_row(scored: &[&Scored], config_index: usize, threshold: f32) -> RowScore {
+    let key = KeyScore::from_alternatives(scored.iter().filter_map(|entry| {
+        let labels = entry.labels()?;
+        Some((
+            entry.result.outcomes[config_index].key_at(threshold),
+            labels,
+        ))
     }));
     let atonal = AtonalScore::from_predictions(
         scored
@@ -236,29 +303,23 @@ fn score_row(scored: &[&Scored], config_index: usize, threshold: f32) -> RowScor
     RowScore { key, atonal }
 }
 
-fn pct(value: Option<f64>) -> String {
+pub fn pct(value: Option<f64>) -> String {
     value.map_or("-".to_string(), |v| format!("{:.1}", 100.0 * v))
 }
 
 pub fn run(args: &KeySweepArgs) -> Result<(), String> {
     let started = Instant::now();
-    let (dataset, selected) = crate::load_selection(&args.dataset)?;
-    let has_key_label =
-        |sound: &&Sound| matches!(sound.labels.key, KeyLabel::Key(_) | KeyLabel::Atonal);
-    let sounds: Vec<&Sound> = if args.calibrate {
-        dataset
-            .sounds
-            .iter()
-            .filter(|sound| matches!(sound.split, Split::Train | Split::Val))
-            .filter(has_key_label)
-            .collect()
+    // Calibration fits on train and checks on val, whatever `--split` says.
+    let needs_train_and_val = args.calibrate || args.fit_profile;
+    let split = if needs_train_and_val {
+        SplitChoice::All
     } else {
-        selected
-            .iter()
-            .map(|&i| &dataset.sounds[i])
-            .filter(has_key_label)
-            .collect()
+        args.corpus.split
     };
+    let mut items = key_corpus::load_items(&args.corpus, split)?;
+    if needs_train_and_val {
+        items.retain(|item| matches!(item.split, Split::Train | Split::Val));
+    }
     let grid = config_grid(args);
     let thresholds = if args.tonalness_threshold.is_empty() {
         vec![KeyDetectorConfig::default().tonalness_threshold]
@@ -266,39 +327,34 @@ pub fn run(args: &KeySweepArgs) -> Result<(), String> {
         args.tonalness_threshold.clone()
     };
     println!(
-        "{} keyed/atonal sounds x {} configs x {} thresholds",
-        sounds.len(),
+        "{} keyed/atonal sounds x {} configs x {} thresholds, window {}",
+        items.len(),
         grid.len(),
-        thresholds.len()
+        thresholds.len(),
+        args.window
     );
 
-    let min_seconds = args.dataset.min_seconds;
-    let outcomes = run::par_map_sounds(&sounds, |sound| analyze_sound(sound, min_seconds, &grid));
-    let mut scored = Vec::new();
-    let mut failures = Vec::new();
-    for (sound, outcome) in sounds.iter().copied().zip(outcomes) {
-        match outcome {
-            Ok(result) => scored.push(Scored { sound, result }),
-            Err(error) => failures.push((sound, error)),
-        }
-    }
-    let skipped = crate::summarize_failures(&failures);
+    let scored = analyze_items(&items, args.window, args.corpus.min_seconds, &grid);
     println!(
-        "analyzed {} sounds, skipped {} {skipped:?} in {:.1}s\n",
+        "analyzed {} sounds in {:.1}s\n",
         scored.len(),
-        failures.len(),
         started.elapsed().as_secs_f32()
     );
 
+    if let Some(path) = &args.csv {
+        write_outcomes_csv(path, &scored)?;
+        println!("wrote {}", path.display());
+    }
     if args.calibrate {
         calibrate(&scored, thresholds[0]);
         return Ok(());
     }
-    let all: Vec<&Scored> = scored.iter().collect();
-    let hip_hop: Vec<&Scored> = scored.iter().filter(|s| s.sound.is_hip_hop).collect();
+    if args.fit_profile {
+        fit_profiles(&scored, &grid[0], thresholds[0], args);
+        return Ok(());
+    }
     print_table(&TableInput {
-        all: &all,
-        hip_hop: &hip_hop,
+        scored: &scored,
         grid: &grid,
         thresholds: &thresholds,
         max_false_key: args.max_false_key,
@@ -306,59 +362,143 @@ pub fn run(args: &KeySweepArgs) -> Result<(), String> {
 
     if args.analyze {
         let annotations = args
-            .dataset
+            .corpus
             .data
             .join("fsl10k-annotations")
             .join("annotations");
-        let instrumentation = load_instrumentation(&annotations, &all)?;
-        print_analysis(&all, thresholds[0], &instrumentation);
+        let fsl10k = subset(&scored, Corpus::Fsl10k);
+        let instrumentation = load_instrumentation(&annotations, &fsl10k)?;
+        for corpus in corpora(&scored) {
+            println!("\n=== {corpus}");
+            print_analysis(&subset(&scored, corpus), thresholds[0], &instrumentation);
+        }
     }
     Ok(())
 }
 
+/// The entries of `scored` from `corpus`.
+pub fn subset<'a>(scored: &'a [Scored<'a>], corpus: Corpus) -> Vec<&'a Scored<'a>> {
+    scored
+        .iter()
+        .filter(|entry| entry.item.corpus == corpus)
+        .collect()
+}
+
 struct TableInput<'a> {
-    all: &'a [&'a Scored<'a>],
-    hip_hop: &'a [&'a Scored<'a>],
+    scored: &'a [Scored<'a>],
     grid: &'a [KeyDetectorConfig],
     thresholds: &'a [f32],
     max_false_key: f64,
 }
 
+/// One dataset's columns in the sweep table. FSL10K also gets false-key and hip hop columns.
+struct CorpusColumns<'a> {
+    corpus: Corpus,
+    all: Vec<&'a Scored<'a>>,
+    hip_hop: Vec<&'a Scored<'a>>,
+}
+
+impl CorpusColumns<'_> {
+    fn header(&self) -> String {
+        let name = self.corpus.to_string();
+        match self.corpus {
+            Corpus::Fsl10k => format!(
+                "{name}: {:>5} {:>5} {:>5} {:>5} {:>5}",
+                "cov", "same", "mirex", "fkey", "hh-sm"
+            ),
+            Corpus::Beatport | Corpus::Giantsteps => {
+                format!("{name}: {:>5} {:>5} {:>5}", "same", "exact", "mirex")
+            }
+        }
+    }
+
+    /// The row's cells, padded to the header width, and the dataset's score.
+    fn cells(&self, config_index: usize, threshold: f32) -> (String, RowScore) {
+        let row = score_row(&self.all, config_index, threshold);
+        let indent = " ".repeat(self.corpus.to_string().len() + 1);
+        let text = match self.corpus {
+            Corpus::Fsl10k => format!(
+                "{indent} {:>5} {:>5} {:>5} {:>5} {:>5}",
+                pct(row.key.coverage),
+                pct(row.key.same_scale),
+                pct(row.key.mirex),
+                pct(row.atonal.false_key_rate),
+                pct(score_row(&self.hip_hop, config_index, threshold)
+                    .key
+                    .same_scale),
+            ),
+            Corpus::Beatport | Corpus::Giantsteps => format!(
+                "{indent} {:>5} {:>5} {:>5}",
+                pct(row.key.same_scale),
+                pct(row.key.exact),
+                pct(row.key.mirex),
+            ),
+        };
+        (text, row)
+    }
+}
+
 fn print_table(input: &TableInput) {
+    let columns: Vec<CorpusColumns> = corpora(input.scored)
+        .into_iter()
+        .map(|corpus| {
+            let all = subset(input.scored, corpus);
+            let hip_hop = all
+                .iter()
+                .copied()
+                .filter(|entry| entry.item.is_hip_hop)
+                .collect();
+            CorpusColumns {
+                corpus,
+                all,
+                hip_hop,
+            }
+        })
+        .collect();
+    let headers: Vec<String> = columns.iter().map(CorpusColumns::header).collect();
     println!(
-        "{:<58} {:>5} | {:>5} {:>5} {:>5} {:>5} | {:>5} {:>5} {:>5} | {:>7}",
-        "config", "tonal", "cov", "same", "mirex", "fkey", "hh-sm", "hh-mx", "hh-fk", "vs row0"
+        "{:<58} {:>5} | {} | {:>7}",
+        "config",
+        "tonal",
+        headers.join(" | "),
+        "vs row0"
     );
+    let all: Vec<&Scored> = input.scored.iter().collect();
     let mut best: Option<(f64, String)> = None;
     for (index, config) in input.grid.iter().enumerate() {
         for &threshold in input.thresholds {
-            let all = score_row(input.all, index, threshold);
-            let hip_hop = score_row(input.hip_hop, index, threshold);
+            let mut cells = Vec::new();
+            let mut same_scales = Vec::new();
+            let mut is_allowed = true;
+            for column in &columns {
+                let (text, row) = column.cells(index, threshold);
+                cells.push(text);
+                same_scales.push(row.key.same_scale.unwrap_or(0.0));
+                is_allowed &= row.atonal.false_key_rate.unwrap_or(0.0) <= input.max_false_key;
+            }
             let (gained, lost) =
-                paired_same_scale(input.all, (0, input.thresholds[0]), (index, threshold));
+                paired_same_scale(&all, (0, input.thresholds[0]), (index, threshold));
             let line = format!(
-                "{:<58} {:>5.3} | {:>5} {:>5} {:>5} {:>5} | {:>5} {:>5} {:>5} | +{gained}/-{lost}",
+                "{:<58} {:>5.3} | {} | +{gained}/-{lost}",
                 describe(config),
                 threshold,
-                pct(all.key.coverage),
-                pct(all.key.same_scale),
-                pct(all.key.mirex),
-                pct(all.atonal.false_key_rate),
-                pct(hip_hop.key.same_scale),
-                pct(hip_hop.key.mirex),
-                pct(hip_hop.atonal.false_key_rate),
+                cells.join(" | "),
             );
             println!("{line}");
-            let same_scale = all.key.same_scale.unwrap_or(0.0);
-            let is_allowed = all.atonal.false_key_rate.unwrap_or(0.0) <= input.max_false_key;
-            if is_allowed && best.as_ref().is_none_or(|(score, _)| same_scale > *score) {
-                best = Some((same_scale, line));
+            // Datasets count equally, so the larger one doesn't decide alone.
+            let mean_same_scale = same_scales.iter().sum::<f64>() / same_scales.len().max(1) as f64;
+            if is_allowed
+                && best
+                    .as_ref()
+                    .is_none_or(|(score, _)| mean_same_scale > *score)
+            {
+                best = Some((mean_same_scale, line));
             }
         }
     }
     match best {
         Some((_, line)) => println!(
-            "\nbest same-scale with false-key <= {:.0}%:\n{line}",
+            "\nbest mean same-scale over datasets with false-key <= {:.0}%:\n{line}",
             100.0 * input.max_false_key
         ),
         None => println!("\nno row meets the false-key limit"),
@@ -373,12 +513,14 @@ fn paired_same_scale(
     candidate: (usize, f32),
 ) -> (usize, usize) {
     let is_right = |entry: &Scored, (index, threshold): (usize, f32)| {
-        let label = entry.label();
         let key = entry.result.outcomes[index].key_at(threshold);
-        matches!((key, label), (Some(key), Some(label)) if metrics::is_same_scale(key, label))
+        match (key, entry.labels()) {
+            (Some(key), Some(labels)) => metrics::is_same_scale_as_any(key, labels),
+            _ => false,
+        }
     };
     let mut counts = (0, 0);
-    for entry in scored.iter().filter(|entry| entry.label().is_some()) {
+    for entry in scored.iter().filter(|entry| entry.labels().is_some()) {
         match (is_right(entry, reference), is_right(entry, candidate)) {
             (false, true) => counts.0 += 1,
             (true, false) => counts.1 += 1,
@@ -427,6 +569,14 @@ fn relation(predicted: Option<Key>, label: Key) -> Relation {
     } else {
         Relation::Other
     }
+}
+
+/// The alternative of `labels` the prediction comes closest to, by `Relation` order.
+fn closest_label(predicted: Option<Key>, labels: &[Key]) -> Option<Key> {
+    labels
+        .iter()
+        .copied()
+        .min_by_key(|&label| relation(predicted, label))
 }
 
 fn is_semitone_off(predicted: Key, label: Key) -> bool {
@@ -481,7 +631,7 @@ fn load_instrumentation(
         .collect();
     let mut instruments = BTreeMap::new();
     for entry in scored {
-        let id = entry.sound.id;
+        let id = entry.item.id;
         let mut present: Vec<&'static str> = Vec::new();
         for annotator in &annotators {
             let path = annotator.join(format!("sound-{id}.json"));
@@ -542,6 +692,34 @@ fn bin_name(value: f32, edges: &[f32], unit: &str) -> String {
     format!(">= {low} {unit}")
 }
 
+/// Mean chroma and bass chroma per label mode, rotated so index 0 is the labeled tonic.
+fn print_mean_chroma(keyed: &[(&Scored, Key, Outcome)]) {
+    for mode in [Mode::Major, Mode::Minor] {
+        let mut treble = [0.0f32; PITCH_CLASSES as usize];
+        let mut bass = [0.0f32; PITCH_CLASSES as usize];
+        let mut count = 0usize;
+        for (_, label, outcome) in keyed.iter().filter(|(_, label, _)| label.mode == mode) {
+            count += 1;
+            let tonic = usize::from(label.tonic.index());
+            for interval in 0..PITCH_CLASSES as usize {
+                let pitch = (tonic + interval) % PITCH_CLASSES as usize;
+                treble[interval] += outcome.chroma[pitch];
+                bass[interval] += outcome.bass_chroma[pitch];
+            }
+        }
+        let format = |values: &[f32; PITCH_CLASSES as usize]| {
+            values
+                .iter()
+                .map(|value| format!("{:.2}", value / count.max(1) as f32))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        println!("  mean chroma from the labeled tonic, {mode} labels (n {count}):");
+        println!("    treble {}", format(&treble));
+        println!("    bass   {}", format(&bass));
+    }
+}
+
 fn print_analysis(
     scored: &[&Scored],
     threshold: f32,
@@ -550,7 +728,11 @@ fn print_analysis(
     println!("\nerror analysis, config 0 at tonalness {threshold}:");
     let keyed: Vec<(&Scored, Key, Outcome)> = scored
         .iter()
-        .filter_map(|entry| Some((*entry, entry.label()?, entry.result.outcomes[0])))
+        .filter_map(|entry| {
+            let outcome = entry.result.outcomes[0];
+            let label = closest_label(outcome.key_at(threshold), entry.labels()?)?;
+            Some((*entry, label, outcome))
+        })
         .collect();
 
     // Counts per relation, split by label mode: [major, minor].
@@ -567,7 +749,7 @@ fn print_analysis(
             .or_default()
             .add(relation);
         let instruments = instrumentation
-            .get(&entry.sound.id)
+            .get(&entry.item.id)
             .cloned()
             .unwrap_or_default();
         for name in &instruments {
@@ -593,7 +775,7 @@ fn print_analysis(
         }
         by_length
             .entry(bin_name(
-                entry.result.loop_seconds,
+                entry.result.source_seconds,
                 &LOOP_SECONDS_EDGES,
                 "s",
             ))
@@ -631,6 +813,7 @@ fn print_analysis(
         })
         .count();
     println!("  minor labels predicted major: {predicted_major_for_minor}");
+    print_mean_chroma(&keyed);
     for (title, groups) in [
         ("by label mode", &by_mode),
         ("by instrumentation", &by_instrument),
@@ -652,7 +835,7 @@ fn print_analysis(
     for (entry, outcome) in &atonal {
         let has_key = usize::from(outcome.key_at(threshold).is_some());
         let instruments = instrumentation
-            .get(&entry.sound.id)
+            .get(&entry.item.id)
             .cloned()
             .unwrap_or_default();
         let group = if instruments.is_empty() {
@@ -716,8 +899,8 @@ fn calibration_points(scored: &[&Scored], threshold: f32) -> Vec<CalibrationPoin
         .filter_map(|entry| {
             let outcome = entry.result.outcomes[0];
             let key = outcome.key_at(threshold)?;
-            let is_correct = match entry.label() {
-                Some(label) => metrics::is_same_scale(key, label),
+            let is_correct = match entry.labels() {
+                Some(labels) => metrics::is_same_scale_as_any(key, labels),
                 None if entry.is_atonal() => false,
                 None => return None,
             };
@@ -814,13 +997,10 @@ fn print_reliability(
         bins[bin].3 += point.weight * f64::from(u8::from(point.is_correct));
     }
     println!("{name}:");
-    let total_weight: f64 = bins.iter().map(|bin| bin.1).sum();
-    let mut gap = 0.0;
     for (index, (sounds, weight, confidence, correct)) in bins.iter().enumerate() {
         if *sounds == 0 {
             continue;
         }
-        gap += (correct - confidence).abs();
         println!(
             "  {:.1}-{:.1}  n {sounds:>4}  mean conf {:>5}%  same-scale {:>5}%",
             index as f64 / RELIABILITY_BINS as f64,
@@ -829,7 +1009,11 @@ fn print_reliability(
             pct(Some(correct / weight)),
         );
     }
-    let ece = (total_weight > 0.0).then(|| gap / total_weight);
+    let ece = metrics::expected_calibration_error(
+        points
+            .iter()
+            .map(|point| (confidence_of(point), point.is_correct, point.weight)),
+    );
     println!("  expected calibration error {}%", pct(ece));
 }
 
@@ -843,16 +1027,17 @@ fn mean(values: impl IntoIterator<Item = f64>) -> Option<f64> {
 }
 
 fn calibrate(scored: &[Scored], threshold: f32) {
-    let split = |wanted: Split| -> Vec<&Scored> {
+    let split = |wanted: Split, corpus: Option<Corpus>| -> Vec<&Scored> {
         scored
             .iter()
-            .filter(|entry| entry.sound.split == wanted)
+            .filter(|entry| entry.item.split == wanted)
+            .filter(|entry| corpus.is_none_or(|corpus| entry.item.corpus == corpus))
             .collect()
     };
-    let train = calibration_points(&split(Split::Train), threshold);
+    let train = calibration_points(&split(Split::Train, None), threshold);
     let model = fit_confidence(&train);
     println!(
-        "confidence model fitted on {} train sounds (atonal weight share {ATONAL_WEIGHT_SHARE}):",
+        "confidence model fitted on {} train sounds of every dataset (atonal weight share {ATONAL_WEIGHT_SHARE}):",
         train.len()
     );
     println!("  CONFIDENCE_BIAS: f32 = {:.3};", model.bias);
@@ -861,36 +1046,238 @@ fn calibrate(scored: &[Scored], threshold: f32) {
         model.separation_weight
     );
     println!(
-        "  CONFIDENCE_TONALNESS_WEIGHT: f32 = {:.3};\n",
+        "  CONFIDENCE_TONALNESS_WEIGHT: f32 = {:.3};
+",
         model.tonalness_weight
     );
 
     let uncalibrated = |point: &CalibrationPoint| f64::from(point.separation * point.evidence);
     let calibrated = |point: &CalibrationPoint| model.confidence(point);
-    for (name, wanted) in [("train", Split::Train), ("val", Split::Val)] {
-        let points = calibration_points(&split(wanted), threshold);
-        let everything: Vec<&CalibrationPoint> = points.iter().collect();
-        let keyed: Vec<&CalibrationPoint> = points.iter().filter(|p| !p.is_atonal).collect();
-        print_reliability(
-            &format!("{name} keyed, separation x evidence"),
-            &keyed,
-            uncalibrated,
-        );
-        print_reliability(&format!("{name} keyed, calibrated"), &keyed, calibrated);
-        print_reliability(
-            &format!("{name} reweighted population, calibrated"),
-            &everything,
-            calibrated,
-        );
+    for (split_name, wanted) in [("train", Split::Train), ("val", Split::Val)] {
+        for corpus in corpora(scored) {
+            let name = format!("{corpus} {split_name}");
+            let points = calibration_points(&split(wanted, Some(corpus)), threshold);
+            let everything: Vec<&CalibrationPoint> = points.iter().collect();
+            let keyed: Vec<&CalibrationPoint> = points.iter().filter(|p| !p.is_atonal).collect();
+            print_reliability(
+                &format!("{name} keyed, separation x evidence"),
+                &keyed,
+                uncalibrated,
+            );
+            print_reliability(&format!("{name} keyed, calibrated"), &keyed, calibrated);
+            if keyed.len() < everything.len() {
+                print_reliability(
+                    &format!("{name} reweighted population, calibrated"),
+                    &everything,
+                    calibrated,
+                );
+            }
 
-        let mean_where = |wanted: fn(&CalibrationPoint) -> bool| {
-            mean(points.iter().filter(|p| wanted(p)).map(calibrated))
+            let mean_where = |wanted: fn(&CalibrationPoint) -> bool| {
+                mean(points.iter().filter(|p| wanted(p)).map(calibrated))
+            };
+            println!(
+                "{name} mean calibrated confidence: correct keys {}%, wrong-scale keyed {}%, atonal false keys {}%
+",
+                pct(mean_where(|p| p.is_correct)),
+                pct(mean_where(|p| !p.is_correct && !p.is_atonal)),
+                pct(mean_where(|p| p.is_atonal)),
+            );
+        }
+    }
+}
+
+fn profile_samples(scored: &[&Scored]) -> Vec<(usize, ProfileSample)> {
+    scored
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            let outcome = &entry.result.outcomes[0];
+            let sample =
+                ProfileSample::new(&outcome.chroma, &outcome.bass_chroma, entry.labels()?)?;
+            Some((index, sample))
+        })
+        .collect()
+}
+
+/// Same-scale / exact / MIREX of `model` on `scored`, ungated and gated at `threshold`.
+fn profile_scores(
+    model: &ProfileModel,
+    scored: &[&Scored],
+    threshold: f32,
+) -> (KeyScore, KeyScore) {
+    let samples = profile_samples(scored);
+    let predictions: Vec<(Key, &[Key], f32)> = samples
+        .iter()
+        .filter_map(|(index, sample)| {
+            let entry = scored[*index];
+            Some((
+                model.predict(sample),
+                entry.labels()?,
+                entry.result.outcomes[0].tonalness,
+            ))
+        })
+        .collect();
+    let ungated = KeyScore::from_alternatives(
+        predictions
+            .iter()
+            .map(|(key, labels, _)| (Some(*key), *labels)),
+    );
+    let gated =
+        KeyScore::from_alternatives(predictions.iter().map(|(key, labels, tonalness)| {
+            (Some(*key).filter(|_| *tonalness >= threshold), *labels)
+        }));
+    (ungated, gated)
+}
+
+fn print_profile_scores(name: &str, model: &ProfileModel, scored: &[Scored], threshold: f32) {
+    let mut cells = Vec::new();
+    for split in [Split::Train, Split::Val] {
+        for corpus in corpora(scored) {
+            let entries: Vec<&Scored> = subset(scored, corpus)
+                .into_iter()
+                .filter(|entry| entry.item.split == split)
+                .collect();
+            let (ungated, gated) = profile_scores(model, &entries, threshold);
+            cells.push(format!(
+                "{corpus} {split} {}/{}/{} gated {}",
+                pct(ungated.same_scale),
+                pct(ungated.exact),
+                pct(ungated.mirex),
+                pct(gated.same_scale)
+            ));
+        }
+    }
+    println!("{name:<16} {}", cells.join(" | "));
+}
+
+/// Fits the profile on train with each dataset weighted equally, then scores train and val.
+fn fit_profiles(
+    scored: &[Scored],
+    config: &KeyDetectorConfig,
+    threshold: f32,
+    args: &KeySweepArgs,
+) {
+    let profile = config.profile;
+    let Some(prior) = ProfileModel::from_hand(
+        [profile.template(Mode::Major), profile.template(Mode::Minor)],
+        f64::from(config.tonic_weight),
+    ) else {
+        eprintln!("error: {profile:?} has a flat template");
+        return;
+    };
+    let mut train = Vec::new();
+    for corpus in corpora(scored) {
+        let entries: Vec<&Scored> = subset(scored, corpus)
+            .into_iter()
+            .filter(|entry| entry.item.split == Split::Train)
+            .collect();
+        let mut samples: Vec<ProfileSample> = profile_samples(&entries)
+            .into_iter()
+            .map(|(_, s)| s)
+            .collect();
+        let share = match corpus {
+            Corpus::Fsl10k => args.profile_fsl10k_share,
+            Corpus::Beatport | Corpus::Giantsteps => 1.0 - args.profile_fsl10k_share,
+        };
+        let weight = share / samples.len().max(1) as f64;
+        samples.iter_mut().for_each(|sample| sample.weight = weight);
+        println!(
+            "{corpus}: {} train sounds for the profile fit",
+            samples.len()
+        );
+        train.extend(samples);
+    }
+    println!("same/exact/MIREX ungated, same-scale gated at tonalness {threshold}:");
+    print_profile_scores(&format!("{profile:?}"), &prior, scored, threshold);
+    let settings = args.profile_l2.iter().flat_map(|&l2| {
+        args.profile_exact_share
+            .iter()
+            .map(move |&exact_share| FitSettings {
+                l2,
+                exact_share,
+                learns_tonic_weight: args.profile_tonic_weight,
+                learns_minor_bias: args.profile_minor_bias,
+            })
+    });
+    for settings in settings {
+        let report = profile_fit::fit(&train, &prior, &settings);
+        let name = format!("l2 {} ex {}", settings.l2, settings.exact_share);
+        print_profile_scores(&name, &report.model, scored, threshold);
+        let [major, minor] = report.model.display_templates();
+        let format = |template: [f64; 12]| {
+            template
+                .iter()
+                .map(|value| format!("{value:.3}"))
+                .collect::<Vec<_>>()
+                .join(", ")
         };
         println!(
-            "{name} mean calibrated confidence: correct keys {}%, wrong-scale keyed {}%, atonal false keys {}%\n",
-            pct(mean_where(|p| p.is_correct)),
-            pct(mean_where(|p| !p.is_correct && !p.is_atonal)),
-            pct(mean_where(|p| p.is_atonal)),
+            "  loss {:.4} after {} steps, scale {:.2}, tonic_weight {:.4}, minor_bias {:.4}",
+            report.loss,
+            report.iterations,
+            report.model.scale,
+            report.model.tonic_weight,
+            report.model.minor_bias
         );
+        println!("  major [{}]", format(major));
+        println!("  minor [{}]", format(minor));
     }
+}
+
+#[derive(Serialize)]
+struct OutcomeRow {
+    corpus: String,
+    id: u64,
+    split: String,
+    labels: String,
+    predicted: String,
+    same_scale: bool,
+    exact: bool,
+    tonalness: f32,
+    separation: f32,
+    clarity: f32,
+    evidence: f32,
+    confidence: f32,
+    tuning_cents: f32,
+}
+
+fn write_outcomes_csv(path: &Path, scored: &[Scored]) -> Result<(), String> {
+    let mut writer = csv::Writer::from_path(path)
+        .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
+    for entry in scored {
+        let outcome = &entry.result.outcomes[0];
+        let labels = entry.labels().unwrap_or_default();
+        let row = OutcomeRow {
+            corpus: entry.item.corpus.to_string(),
+            id: entry.item.id,
+            split: entry.item.split.to_string(),
+            labels: if entry.is_atonal() {
+                "atonal".to_string()
+            } else {
+                labels
+                    .iter()
+                    .map(Key::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            },
+            predicted: outcome.key.map(|key| key.to_string()).unwrap_or_default(),
+            same_scale: outcome
+                .key
+                .is_some_and(|key| metrics::is_same_scale_as_any(key, labels)),
+            exact: outcome.key.is_some_and(|key| labels.contains(&key)),
+            tonalness: outcome.tonalness,
+            separation: outcome.separation,
+            clarity: outcome.clarity,
+            evidence: outcome.evidence,
+            confidence: outcome.confidence,
+            tuning_cents: outcome.tuning_cents,
+        };
+        writer
+            .serialize(row)
+            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    }
+    writer
+        .flush()
+        .map_err(|error| format!("cannot write {}: {error}", path.display()))
 }

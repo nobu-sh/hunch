@@ -13,8 +13,8 @@ use serde::Deserialize;
 /// Two tempi count as the same within this relative tolerance (the MIREX Accuracy1 window).
 pub const TEMPO_TOLERANCE: f32 = 0.04;
 const HIP_HOP_GENRE: &str = "hip hop";
-const TRAIN_PERCENT: u64 = 70;
-const VAL_PERCENT: u64 = 15;
+/// Target share of all sounds per split, in percent.
+const SPLIT_PERCENTS: [(Split, u64); 3] = [(Split::Train, 70), (Split::Val, 15), (Split::Test, 15)];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ValueEnum)]
 pub enum Split {
@@ -25,43 +25,44 @@ pub enum Split {
 
 impl Split {
     pub const ALL: [Split; 3] = [Split::Train, Split::Val, Split::Test];
-
-    /// Target share of all sounds, in percent.
-    fn target_percent(self) -> u64 {
-        match self {
-            Split::Train => TRAIN_PERCENT,
-            Split::Val => VAL_PERCENT,
-            Split::Test => 100 - TRAIN_PERCENT - VAL_PERCENT,
-        }
-    }
 }
 
 /// Assigns every creator to one split, so one creator's loops never straddle splits.
-///
-/// Hashing creators straight into buckets lets one prolific creator (one has ~1,650 loops) skew a
-/// split badly. Instead creators are placed largest first, each into the split furthest below its
-/// target share. Equal sizes are ordered by FNV-1a of the name, so the result is deterministic.
 pub fn assign_splits<'a>(usernames: impl IntoIterator<Item = &'a str>) -> HashMap<&'a str, Split> {
+    assign_groups(usernames, &SPLIT_PERCENTS)
+}
+
+/// Assigns every group (one entry per member) to one split with roughly the `targets` share of
+/// members, in percent.
+///
+/// Hashing groups straight into buckets lets one large group (one FSL10K creator has ~1,650 loops)
+/// skew a split badly. Instead groups are placed largest first, each into the split furthest below
+/// its target share. Equal sizes are ordered by FNV-1a of the name, so the result is deterministic.
+pub fn assign_groups<'a>(
+    members: impl IntoIterator<Item = &'a str>,
+    targets: &[(Split, u64)],
+) -> HashMap<&'a str, Split> {
     let mut sizes: HashMap<&str, u64> = HashMap::new();
-    for username in usernames {
-        *sizes.entry(username).or_default() += 1;
+    for name in members {
+        *sizes.entry(name).or_default() += 1;
     }
     let total: u64 = sizes.values().sum();
-    let mut creators: Vec<(&str, u64)> = sizes.into_iter().collect();
-    creators.sort_by_key(|&(name, size)| (Reverse(size), fnv1a(name.as_bytes())));
+    let mut groups: Vec<(&str, u64)> = sizes.into_iter().collect();
+    groups.sort_by_key(|&(name, size)| (Reverse(size), fnv1a(name.as_bytes())));
 
-    let mut filled = [0u64; 3];
-    let mut splits = HashMap::with_capacity(creators.len());
-    for (name, size) in creators {
+    let mut filled = vec![0u64; targets.len()];
+    let mut splits = HashMap::with_capacity(groups.len());
+    for (name, size) in groups {
         // Shortfall from the target, scaled by 100 to stay in integers.
-        let shortfall = |index: usize| {
-            (Split::ALL[index].target_percent() * total) as i64 - (filled[index] * 100) as i64
+        let shortfall =
+            |index: usize| (targets[index].1 * total) as i64 - (filled[index] * 100) as i64;
+        let Some(index) =
+            (0..targets.len()).max_by_key(|&index| (shortfall(index), Reverse(index)))
+        else {
+            break;
         };
-        let index = (0..Split::ALL.len())
-            .max_by_key(|&index| (shortfall(index), Reverse(index)))
-            .unwrap_or(0);
         filled[index] += size;
-        splits.insert(name, Split::ALL[index]);
+        splits.insert(name, targets[index].0);
     }
     splits
 }
@@ -299,7 +300,7 @@ fn key_vote(annotation: &ExpertAnnotation) -> KeyVote {
 }
 
 /// Parses a lowercase note name like `c`, `f#` or `bb`.
-fn parse_pitch_class(name: &str) -> Option<PitchClass> {
+pub fn parse_pitch_class(name: &str) -> Option<PitchClass> {
     const NATURALS: [(char, i8); 7] = [
         ('c', 0),
         ('d', 2),

@@ -3,9 +3,12 @@
 mod decode;
 mod fit;
 mod fsl10k;
+mod key_corpus;
 mod key_sweep;
+mod keydata;
 mod metrics;
 mod octave;
+mod profile_fit;
 mod report;
 mod resample;
 mod run;
@@ -27,9 +30,9 @@ use crate::report::{Evaluated, SubsetReport, Summary};
 use crate::run::CHUNK_SECONDS;
 
 const AUDIO_EXTENSIONS: [&str; 6] = ["wav", "mp3", "flac", "ogg", "aiff", "aif"];
-const DEFAULT_DATA_DIR: &str = r"G:\hunch\data";
+pub(crate) const DEFAULT_DATA_DIR: &str = r"G:\hunch\data";
 const DEFAULT_L2: f64 = 1e-2;
-const MAX_LISTED_FAILURES: usize = 20;
+pub(crate) const MAX_LISTED_FAILURES: usize = 20;
 
 #[derive(Parser)]
 #[command(version, about = "Evaluate hunch-core on audio files and datasets")]
@@ -49,7 +52,7 @@ enum Command {
     /// Fit the tempo octave decision weights from octave-features CSVs.
     FitOctave(FitOctaveCliArgs),
     /// Score a grid of KeyDetector configs on FSL10K keyed and atonal sounds.
-    KeySweep(key_sweep::KeySweepArgs),
+    KeySweep(Box<key_sweep::KeySweepArgs>),
 }
 
 #[derive(Args)]
