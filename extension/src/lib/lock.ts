@@ -1,4 +1,5 @@
 import type { Estimate } from './messages';
+import { parseKey, scaleId } from './music';
 
 export const LOCK_STREAK = 3;
 export const BPM_LOCK_CONFIDENCE = 0.6;
@@ -21,9 +22,17 @@ export function isBpmLocked(estimates: Estimate[]): boolean {
   );
 }
 
-/** Key locks when confident and unchanged for `LOCK_STREAK` estimates. Newest last. */
+/**
+ * Key locks when confident and its scale held for `LOCK_STREAK` estimates. Newest last.
+ * Flipping between relative keys keeps the streak: they're the same notes for autotune.
+ */
 export function isKeyLocked(estimates: Estimate[]): boolean {
   const latest = estimates.at(-1);
   if (!latest || latest.keyConfidence < KEY_LOCK_CONFIDENCE) return false;
-  return isStable(estimates.map((estimate) => estimate.key));
+  return isStable(
+    estimates.map((estimate) => {
+      const key = estimate.key === null ? null : parseKey(estimate.key);
+      return key === null ? null : scaleId(key);
+    }),
+  );
 }

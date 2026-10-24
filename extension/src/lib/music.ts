@@ -38,6 +38,11 @@ export function relativeKey(key: Key): Key {
     : { tonic: (key.tonic + RELATIVE_MAJOR_OFFSET) % PITCH_CLASSES, mode: 'major' };
 }
 
+/** Identifies the note set: relative keys (F# major, D# minor) share one id, the major tonic. */
+export function scaleId(key: Key): number {
+  return key.mode === 'major' ? key.tonic : relativeKey(key).tonic;
+}
+
 /** The seven scale notes from the tonic, in sharps: `F# G# A# B C# D# F`. */
 export function scaleNotes(key: Key): string[] {
   const steps = key.mode === 'major' ? MAJOR_STEPS : NATURAL_MINOR_STEPS;

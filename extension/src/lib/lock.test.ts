@@ -56,10 +56,16 @@ describe('isKeyLocked', () => {
     expect(isKeyLocked([estimate(), estimate(), estimate({ keyConfidence: 0.55 })])).toBe(true);
   });
 
-  it('does not lock while the key changes', () => {
-    const estimates = [estimate(), estimate({ key: 'D# minor' }), estimate()];
+  it('does not lock while the scale changes', () => {
+    const estimates = [estimate(), estimate({ key: 'C# major' }), estimate()];
 
     expect(isKeyLocked(estimates)).toBe(false);
+  });
+
+  it('keeps locking when the key flips to its relative', () => {
+    const estimates = [estimate(), estimate({ key: 'D# minor' }), estimate()];
+
+    expect(isKeyLocked(estimates)).toBe(true);
   });
 
   it('does not lock below the confidence threshold', () => {
