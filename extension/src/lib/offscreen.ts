@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import type { OffscreenRequest } from './messages';
 
 const OFFSCREEN_PATH = '/offscreen.html';
 
@@ -32,4 +33,9 @@ export async function ensureOffscreenDocument(): Promise<void> {
 export async function closeOffscreenDocument(): Promise<void> {
   if (!(await hasOffscreenDocument())) return;
   await browser.offscreen.closeDocument();
+}
+
+/** Sends a request to the offscreen document, which must exist. */
+export async function sendOffscreenRequest(request: OffscreenRequest): Promise<void> {
+  await browser.runtime.sendMessage(request);
 }
