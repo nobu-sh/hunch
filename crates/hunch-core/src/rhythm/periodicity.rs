@@ -98,9 +98,9 @@ impl Autocorrelation {
     }
 }
 
-/// The strongest beat period found in an envelope's autocorrelation.
+/// A beat period found in an envelope's autocorrelation.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DominantPeriod {
+pub struct Period {
     /// In frames, refined to a fraction.
     pub lag: f32,
     /// Comb strength at `lag`, before the search prior. Roughly 0 for noise, up to 1 for a strict loop.
@@ -113,26 +113,36 @@ pub struct LagRange {
     pub longest: usize,
 }
 
-/// Argmax of the prior-weighted comb over `range`, refined by parabolic interpolation.
-pub fn dominant_period(
+/// Local maxima of the prior-weighted comb over `range`, strongest first, each refined by
+/// parabolic interpolation.
+pub fn strongest_periods(
     autocorrelation: &Autocorrelation,
     range: LagRange,
     frame_rate: f32,
-) -> Option<DominantPeriod> {
+) -> Vec<Period> {
     let weighted = |lag: f32| autocorrelation.comb(lag) * search_prior(lag, frame_rate);
-    let best = (range.shortest..=range.longest)
-        .filter(|&lag| autocorrelation.covers(lag as f32))
+    let scores: Vec<(usize, f32)> = (range.shortest..=range.longest)
+        .filter(|&lag| lag > 0 && autocorrelation.covers(lag as f32))
         .map(|lag| (lag, weighted(lag as f32)))
-        .max_by(|a, b| a.1.total_cmp(&b.1))?;
+        .collect();
 
-    let (best_lag, best_score) = best;
-    let lag = best_lag as f32;
-    let offset = parabolic_offset([weighted(lag - 1.0), best_score, weighted(lag + 1.0)]);
-    let refined = lag + offset;
-    Some(DominantPeriod {
-        lag: refined,
-        strength: autocorrelation.comb(refined),
-    })
+    let mut peaks: Vec<(f32, f32)> = scores
+        .windows(3)
+        .filter(|window| window[1].1 > window[0].1 && window[1].1 >= window[2].1)
+        .map(|window| {
+            let lag = window[1].0 as f32;
+            let offset = parabolic_offset([window[0].1, window[1].1, window[2].1]);
+            (lag + offset, window[1].1)
+        })
+        .collect();
+    peaks.sort_by(|a, b| b.1.total_cmp(&a.1));
+    peaks
+        .into_iter()
+        .map(|(lag, _)| Period {
+            lag,
+            strength: autocorrelation.comb(lag),
+        })
+        .collect()
 }
 
 /// Converts between a beat period in frames and a tempo.
@@ -190,13 +200,13 @@ mod tests {
     }
 
     #[test]
-    fn dominant_period_finds_pulse() {
+    fn strongest_period_is_the_pulse() {
         let acf = Autocorrelation::new(&pulse_train(50, 2_000), 400).expect("periodic envelope");
         let range = LagRange {
             shortest: 30,
             longest: 100,
         };
-        let period = dominant_period(&acf, range, 100.0).expect("lags in range");
+        let period = strongest_periods(&acf, range, 100.0)[0];
         assert!((period.lag - 50.0).abs() < 0.5, "lag {}", period.lag);
         assert!(period.strength > 0.9);
     }

@@ -1,7 +1,7 @@
 //! Tempo detection.
 //!
-//! Onset envelopes in kick, snare and hat bands are autocorrelated to find the dominant beat
-//! period. Its tempo-octave relatives (×½, ×2, ×⅔, …) become candidates, and a linear model over
+//! Onset envelopes in kick, snare and hat bands are autocorrelated to find the strongest beat
+//! periods. Their tempo-octave relatives (×½, ×2, ×⅔, …) become candidates, and a linear model over
 //! beat-structure features picks the one producers would label the beat with. The model's weights
 //! live in `octave_weights.rs` and are fitted offline by `hunch-eval fit-octave`.
 
@@ -12,25 +12,33 @@ mod periodicity;
 
 use self::features::{BeatEvidence, FEATURE_COUNT, FEATURE_NAMES};
 use self::onset::{Band, OnsetEnvelopes};
-use self::periodicity::{LagRange, bpm_to_lag, dominant_period, lag_to_bpm};
+use self::periodicity::{LagRange, Period, bpm_to_lag, lag_to_bpm, strongest_periods};
 
 /// Audio needed before the first estimate.
 const MIN_SECONDS: f32 = 4.0;
-/// Range the dominant period is searched in. Every tempo in the candidate range has an octave
-/// relative in here, so the right family is always found.
+/// Range the seed periods are searched in. Every tempo in the candidate range has an octave
+/// relative in here, so the right family is found as long as its period is a peak.
 const SEARCH_MIN_BPM: f32 = 60.0;
 const SEARCH_MAX_BPM: f32 = 180.0;
 /// Range candidates must fall in.
 const CANDIDATE_MIN_BPM: f32 = 50.0;
 const CANDIDATE_MAX_BPM: f32 = 250.0;
-/// Tempo ratios to the dominant period that become candidates.
+/// Tempo ratios to each seed period that become candidates.
 const OCTAVE_RATIOS: [f32; 7] = [1.0 / 3.0, 0.5, 2.0 / 3.0, 1.0, 1.5, 2.0, 3.0];
+/// Seed periods: the strongest, plus the next strongest outside its family when that one is at
+/// least this fraction as strong. Catches beats labeled at e.g. 3:4 to the strongest pulse.
+const MAX_SEEDS: usize = 2;
+const MIN_SEED_STRENGTH_RATIO: f32 = 0.6;
+/// Candidates closer than this fraction of their tempo are the same candidate.
+const SAME_TEMPO_TOLERANCE: f32 = 0.03;
 /// The longest lag any feature reads, in beats of the slowest candidate.
 const MAX_LAG_BEATS: f32 = 4.0;
-/// Comb strength at or below this is treated as no rhythm; at `FULL_PERIODICITY` and above the
-/// periodicity factor of the confidence is 1.
-const MIN_PERIODICITY: f32 = 0.15;
-const FULL_PERIODICITY: f32 = 0.5;
+/// Comb strength at or below the no-rhythm threshold gives `bpm: None`; at `FULL_PERIODICITY`
+/// and above, the periodicity factor of the confidence is 1. The threshold is `NOISE_STDS` noise
+/// standard deviations (noise autocorrelates with std ~1/sqrt(frames)), and at least `MIN_PERIODICITY`.
+const NOISE_STDS: f32 = 3.0;
+const MIN_PERIODICITY: f32 = 0.06;
+const FULL_PERIODICITY: f32 = 0.4;
 /// The runner-up is offered as `alternate` when its probability is within this of the winner's.
 const ALTERNATE_MARGIN: f32 = 0.3;
 
@@ -56,7 +64,7 @@ impl TempoEstimate {
 ///
 /// A "beat" is one period of the candidate tempo. ACF values are the normalized, mean-removed
 /// autocorrelation of a band's onset envelope (1 = perfectly periodic, ~0 = unrelated), taking
-/// the peak within ±2% of the lag.
+/// the peak within ±2% (at least ±1 frame) of the lag.
 /// - `log2_tempo`, `log2_tempo_squared`: `log2(bpm / 120)` and its square, the tempo prior.
 /// - `combined_beat`, `combined_half_beat`, `combined_double_beat`: all-band ACF at 1, ½ and 2 beats.
 /// - `low_beat`, `low_two_beats`, `low_four_beats`: kick band (30–150 Hz) ACF at 1, 2 and 4 beats.
@@ -64,8 +72,8 @@ impl TempoEstimate {
 ///   beats. A backbeat is strong at 2 and weak at 1.
 /// - `high_beat`, `high_half_beat`, `high_quarter_beat`: hat band (5–11 kHz) ACF at 1, ½ and ¼
 ///   beat, i.e. hat subdivision.
-/// - `onset_density_deviation`, `hat_density_deviation`: `(log2(onsets per beat) − log2 3)²` for
-///   all onsets and for hat-band onsets: how far the beat is from 8th/16th-note density.
+/// - `onset_density_deviation`, `hat_density_deviation`: `(log2(onsets per beat) − 1)²` for all
+///   onsets and for hat-band onsets: how many octaves the density is from 8th notes.
 /// - `grid_salience`: mean combined envelope on the best-aligned pulse grid over its overall mean.
 /// - `grid_offbeat_contrast`: `(on − off) / (on + off)` for that grid vs the half-beat-shifted one.
 pub const OCTAVE_FEATURE_NAMES: &[&str] = &FEATURE_NAMES;
@@ -88,7 +96,7 @@ pub struct TempoDetector {
 /// The candidates for the current audio and how periodic it is.
 struct Analysis {
     candidates: Vec<OctaveCandidate>,
-    /// 0..=1 factor from the dominant period's comb strength; 0 means no rhythm.
+    /// 0..=1 factor from the strongest period's comb strength; 0 means no rhythm.
     periodicity: f32,
 }
 
@@ -144,9 +152,10 @@ impl TempoDetector {
             shortest: bpm_to_lag(SEARCH_MAX_BPM, frame_rate).floor() as usize,
             longest: bpm_to_lag(SEARCH_MIN_BPM, frame_rate).ceil() as usize,
         };
-        let dominant = dominant_period(evidence.combined(), search, frame_rate)?;
-        let dominant_bpm = lag_to_bpm(dominant.lag, frame_rate);
-        let candidates = candidate_tempi(dominant_bpm)
+        let periods = strongest_periods(evidence.combined(), search, frame_rate);
+        let strongest = *periods.first()?;
+        let candidates = candidate_tempi(&periods, frame_rate)
+            .into_iter()
             .map(|bpm| OctaveCandidate {
                 bpm,
                 features: evidence.candidate_features(bpm).to_vec(),
@@ -155,21 +164,59 @@ impl TempoDetector {
 
         Some(Analysis {
             candidates,
-            periodicity: periodicity_factor(dominant.strength),
+            periodicity: periodicity_factor(PeriodicityInput {
+                strength: strongest.strength,
+                frame_count: history.len(),
+            }),
         })
     }
 }
 
-/// The octave relatives of `dominant_bpm` inside the candidate range, slowest first.
-fn candidate_tempi(dominant_bpm: f32) -> impl Iterator<Item = f32> {
-    OCTAVE_RATIOS
-        .into_iter()
-        .map(move |ratio| dominant_bpm * ratio)
-        .filter(|bpm| (CANDIDATE_MIN_BPM..=CANDIDATE_MAX_BPM).contains(bpm))
+/// The octave relatives of the seed periods inside the candidate range, slowest first.
+/// `periods` is strongest first and non-empty.
+fn candidate_tempi(periods: &[Period], frame_rate: f32) -> Vec<f32> {
+    let mut tempi: Vec<f32> = Vec::new();
+    let mut seeds = 0;
+    for period in periods {
+        let is_strong_enough = period.strength >= MIN_SEED_STRENGTH_RATIO * periods[0].strength;
+        if seeds == MAX_SEEDS || !is_strong_enough {
+            break;
+        }
+        let bpm = lag_to_bpm(period.lag, frame_rate);
+        if contains_tempo(&tempi, bpm) {
+            continue;
+        }
+        seeds += 1;
+        for related in OCTAVE_RATIOS.map(|ratio| bpm * ratio) {
+            let is_in_range = (CANDIDATE_MIN_BPM..=CANDIDATE_MAX_BPM).contains(&related);
+            if is_in_range && !contains_tempo(&tempi, related) {
+                tempi.push(related);
+            }
+        }
+    }
+    tempi.sort_by(f32::total_cmp);
+    tempi
 }
 
-fn periodicity_factor(strength: f32) -> f32 {
-    ((strength - MIN_PERIODICITY) / (FULL_PERIODICITY - MIN_PERIODICITY)).clamp(0.0, 1.0)
+fn contains_tempo(tempi: &[f32], bpm: f32) -> bool {
+    tempi
+        .iter()
+        .any(|&existing| (existing - bpm).abs() <= SAME_TEMPO_TOLERANCE * bpm)
+}
+
+struct PeriodicityInput {
+    /// Comb strength of the strongest period.
+    strength: f32,
+    frame_count: usize,
+}
+
+fn periodicity_factor(input: PeriodicityInput) -> f32 {
+    let noise_floor = NOISE_STDS / (input.frame_count.max(1) as f32).sqrt();
+    let threshold = noise_floor.max(MIN_PERIODICITY);
+    if threshold >= FULL_PERIODICITY {
+        return 0.0;
+    }
+    ((input.strength - threshold) / (FULL_PERIODICITY - threshold)).clamp(0.0, 1.0)
 }
 
 /// Picks the highest-scoring candidate; offers the runner-up as alternate when it's close.
