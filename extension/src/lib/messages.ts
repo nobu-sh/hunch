@@ -1,3 +1,5 @@
+import type { TabState } from './tab-state';
+
 /** Mirrors the `Estimate` object returned by `Analyzer.push` and `Session.push` in crates/hunch-wasm. */
 export interface Estimate {
   key: string | null;
@@ -97,4 +99,40 @@ export function isOffscreenRequest(message: unknown): message is OffscreenReques
 export function isBackgroundMessage(message: unknown): message is BackgroundMessage {
   if (!isObject(message) || typeof message.tabId !== 'number') return false;
   return message.type === 'session-event' || message.type === 'capture-error';
+}
+
+/** Background → overlay content script: the tab's latest state. */
+export interface OverlayStateMessage {
+  target: 'overlay';
+  type: 'state';
+  state: TabState;
+}
+
+/** Background → overlay content script when Hunch is turned off for the tab. */
+export interface OverlayUnmountMessage {
+  target: 'overlay';
+  type: 'unmount';
+}
+
+export type OverlayMessage = OverlayStateMessage | OverlayUnmountMessage;
+
+/** Overlay → background on mount. Replies with the tab's `TabState`, or null when it's off. */
+export interface OverlayHelloRequest {
+  type: 'overlay-hello';
+}
+
+/** Overlay → background: the close button, same as clicking the toolbar icon. */
+export interface OverlayCloseRequest {
+  type: 'overlay-close';
+}
+
+export type OverlayRequest = OverlayHelloRequest | OverlayCloseRequest;
+
+export function isOverlayMessage(message: unknown): message is OverlayMessage {
+  return isObject(message) && message.target === 'overlay';
+}
+
+export function isOverlayRequest(message: unknown): message is OverlayRequest {
+  if (!isObject(message)) return false;
+  return message.type === 'overlay-hello' || message.type === 'overlay-close';
 }
