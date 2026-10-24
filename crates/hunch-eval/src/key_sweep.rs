@@ -889,7 +889,7 @@ const CONFIDENCE_FIT_STEP: f64 = 2.0;
 const MIN_PROBABILITY: f64 = 1e-9;
 /// Share of the fitting weight given to atonal sounds that got a key. FSL10K over-represents drum
 /// loops; in the browser most audio is tonal.
-const ATONAL_WEIGHT_SHARE: f64 = 0.2;
+pub const ATONAL_WEIGHT_SHARE: f64 = 0.2;
 const CONFIDENCE_INPUTS: usize = 3;
 const RELIABILITY_BINS: usize = 10;
 const GATE_FIT_L2: f64 = 1e-3;

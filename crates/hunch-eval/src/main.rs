@@ -6,6 +6,7 @@ mod fsl10k;
 mod key_corpus;
 mod key_sweep;
 mod keydata;
+mod keys;
 mod metrics;
 mod octave;
 mod profile_fit;
@@ -53,6 +54,8 @@ enum Command {
     FitOctave(FitOctaveCliArgs),
     /// Score a grid of KeyDetector configs on FSL10K keyed and atonal sounds.
     KeySweep(Box<key_sweep::KeySweepArgs>),
+    /// Score the default KeyDetector per dataset (FSL10K, Beatport, GiantSteps+) and window.
+    Keys(keys::KeysArgs),
 }
 
 #[derive(Args)]
@@ -177,6 +180,7 @@ fn main() -> ExitCode {
             l2: args.l2,
         }),
         Command::KeySweep(args) => key_sweep::run(&args),
+        Command::Keys(args) => keys::run(&args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
