@@ -231,6 +231,25 @@ mod tests {
     }
 
     #[test]
+    fn marks_fifth_harmonic_as_overtone() {
+        let fundamental = 110.0;
+        let samples: Vec<f32> = (0..WINDOW)
+            .map(|i| {
+                let t = i as f32 / SAMPLE_RATE as f32;
+                (1..=5)
+                    .map(|h| 0.2 / h as f32 * (2.0 * PI * fundamental * h as f32 * t).sin())
+                    .sum()
+            })
+            .collect();
+        let mut picker = picker();
+        picker.analyze(&first_frame(&samples)).expect("not silent");
+
+        let overtones: Vec<bool> = picker.peaks().iter().map(|peak| peak.is_overtone).collect();
+        // Harmonics 1, 2 and 4 share the fundamental's pitch class; 3 and 5 do not.
+        assert_eq!(overtones, [false, false, true, false, true]);
+    }
+
+    #[test]
     fn silence_has_no_summary() {
         let mut picker = picker();
         assert!(picker.analyze(&first_frame(&vec![0.0; WINDOW])).is_none());
