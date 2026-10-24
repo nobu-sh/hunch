@@ -205,7 +205,7 @@ pub fn prepare(item: &KeyItem, window: Window, min_seconds: f32) -> Result<Prepa
 
 /// `WINDOW_SECONDS` from `WINDOW_START_SECONDS` in, or the last `WINDOW_SECONDS` of a track too
 /// short for that (all of it when shorter still).
-fn listening_window(mut samples: Vec<f32>) -> Vec<f32> {
+pub fn listening_window(mut samples: Vec<f32>) -> Vec<f32> {
     let len = seconds_to_samples(WINDOW_SECONDS);
     let start = seconds_to_samples(WINDOW_START_SECONDS).min(samples.len().saturating_sub(len));
     samples.truncate(start + len);

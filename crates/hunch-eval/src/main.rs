@@ -13,6 +13,7 @@ mod profile_fit;
 mod report;
 mod resample;
 mod run;
+mod timeline;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -56,6 +57,8 @@ enum Command {
     KeySweep(Box<key_sweep::KeySweepArgs>),
     /// Score the default KeyDetector per dataset (FSL10K, Beatport, GiantSteps+) and window.
     Keys(keys::KeysArgs),
+    /// Dump every estimate plus key detector inputs per sound, for one split.
+    Timeline(timeline::TimelineArgs),
 }
 
 #[derive(Args)]
@@ -181,6 +184,7 @@ fn main() -> ExitCode {
         }),
         Command::KeySweep(args) => key_sweep::run(&args),
         Command::Keys(args) => keys::run(&args),
+        Command::Timeline(args) => timeline::run(&args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
