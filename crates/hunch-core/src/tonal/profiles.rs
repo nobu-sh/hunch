@@ -70,23 +70,35 @@ impl KeyProfile {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct KeyRanking {
     pub best: Key,
-    /// Pearson correlation of the best key, in -1..=1.
+    /// Pearson correlation of the best key plus its tonic cue.
     pub best_score: f32,
     /// Best correlation among keys that are neither `best` nor its relative.
     pub rival_score: f32,
 }
 
-/// Correlates `chroma` with every key of `profile`. `None` when the chroma is flat.
-pub(super) fn rank_keys(chroma: &[f32; PITCH_CLASSES], profile: KeyProfile) -> Option<KeyRanking> {
+/// How keys are scored against a chroma.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct KeyScoring {
+    pub profile: KeyProfile,
+    /// Per pitch class, 0..=1 evidence that it is the tonic (the bass note distribution).
+    pub tonic_cue: [f32; PITCH_CLASSES],
+    /// How much `tonic_cue` at a key's tonic adds to that key's correlation.
+    pub tonic_weight: f32,
+}
+
+/// Correlates `chroma` with every key of the profile. `None` when the chroma is flat.
+pub(super) fn rank_keys(chroma: &[f32; PITCH_CLASSES], scoring: KeyScoring) -> Option<KeyRanking> {
     let centered_chroma = centered_unit(chroma)?;
     let mut scores = [0.0f32; KEY_COUNT];
     for (mode_index, mode) in MODES.into_iter().enumerate() {
-        let template =
-            centered_unit(profile.template(mode)).expect("built-in key profiles are not flat");
+        let template = centered_unit(scoring.profile.template(mode))
+            .expect("built-in key profiles are not flat");
         for tonic in 0..PITCH_CLASSES {
-            scores[mode_index * PITCH_CLASSES + tonic] = (0..PITCH_CLASSES)
+            let correlation: f32 = (0..PITCH_CLASSES)
                 .map(|pitch| centered_chroma[(tonic + pitch) % PITCH_CLASSES] * template[pitch])
                 .sum();
+            scores[mode_index * PITCH_CLASSES + tonic] =
+                correlation + scoring.tonic_weight * scoring.tonic_cue[tonic];
         }
     }
 
@@ -161,7 +173,12 @@ mod tests {
             for mode in MODES {
                 for tonic in 0..PITCH_CLASSES {
                     let chroma = rotated(profile.template(mode), tonic);
-                    let ranking = rank_keys(&chroma, profile).expect("not flat");
+                    let scoring = KeyScoring {
+                        profile,
+                        tonic_cue: [0.0; PITCH_CLASSES],
+                        tonic_weight: 0.0,
+                    };
+                    let ranking = rank_keys(&chroma, scoring).expect("not flat");
                     assert_eq!(ranking.best, key(tonic, mode), "{profile:?}");
                     assert!((ranking.best_score - 1.0).abs() < 1e-4);
                     assert!(ranking.rival_score < ranking.best_score);
@@ -172,8 +189,32 @@ mod tests {
 
     #[test]
     fn flat_chroma_has_no_ranking() {
-        assert_eq!(rank_keys(&[1.0; PITCH_CLASSES], KeyProfile::Edma), None);
-        assert_eq!(rank_keys(&[0.0; PITCH_CLASSES], KeyProfile::Edma), None);
+        let scoring = KeyScoring {
+            profile: KeyProfile::Edma,
+            tonic_cue: [0.0; PITCH_CLASSES],
+            tonic_weight: 0.0,
+        };
+        assert_eq!(rank_keys(&[1.0; PITCH_CLASSES], scoring), None);
+        assert_eq!(rank_keys(&[0.0; PITCH_CLASSES], scoring), None);
+    }
+
+    #[test]
+    fn tonic_cue_chooses_between_keys_with_the_same_notes() {
+        let mut white_keys = [0.0; PITCH_CLASSES];
+        for pitch in [0, 2, 4, 5, 7, 9, 11] {
+            white_keys[pitch] = 1.0;
+        }
+        for (bass_note, expected) in [(0, key(0, Mode::Major)), (9, key(9, Mode::Minor))] {
+            let mut tonic_cue = [0.0; PITCH_CLASSES];
+            tonic_cue[bass_note] = 1.0;
+            let scoring = KeyScoring {
+                profile: KeyProfile::Edma,
+                tonic_cue,
+                tonic_weight: 0.1,
+            };
+            let ranking = rank_keys(&white_keys, scoring).expect("not flat");
+            assert_eq!(ranking.best, expected, "bass on {bass_note}");
+        }
     }
 
     #[test]
