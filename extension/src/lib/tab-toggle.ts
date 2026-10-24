@@ -1,7 +1,7 @@
 import { browser } from 'wxt/browser';
+import { BADGE_ON_TEXT } from './badge';
 
 const ENABLED_TABS_KEY = 'enabledTabs';
-const BADGE_ON_TEXT = 'ON';
 
 export async function getEnabledTabs(): Promise<number[]> {
   const stored = await browser.storage.session.get(ENABLED_TABS_KEY);

@@ -1,7 +1,19 @@
 import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
-import type { OffscreenPingRequest, PingReply } from '@/lib/messages';
-import { closeOffscreenDocument, ensureOffscreenDocument } from '@/lib/offscreen';
+import { badgeText } from '@/lib/badge';
+import {
+  isBackgroundMessage,
+  type BackgroundMessage,
+  type OffscreenPingRequest,
+  type PingReply,
+} from '@/lib/messages';
+import {
+  closeOffscreenDocument,
+  ensureOffscreenDocument,
+  sendOffscreenRequest,
+} from '@/lib/offscreen';
+import { applySessionEvent, createTabState, withError, type TabState } from '@/lib/tab-state';
+import { clearTabState, updateTabState } from '@/lib/tab-store';
 import { getEnabledTabs, removeTab, toggleTab } from '@/lib/tab-toggle';
 
 async function pingOffscreen(): Promise<void> {
@@ -10,32 +22,103 @@ async function pingOffscreen(): Promise<void> {
   console.log('Hunch offscreen ping reply', reply);
 }
 
+async function isTabEnabled(tabId: number): Promise<boolean> {
+  const enabledTabs = await getEnabledTabs();
+  return enabledTabs.includes(tabId);
+}
+
 async function closeOffscreenIfIdle(): Promise<void> {
   const enabledTabs = await getEnabledTabs();
   if (enabledTabs.length > 0) return;
   await closeOffscreenDocument();
 }
 
-async function handleActionClick(tabId: number): Promise<void> {
-  const isEnabled = await toggleTab(tabId);
-  if (!isEnabled) {
-    await closeOffscreenIfIdle();
+async function publishTabState(state: TabState): Promise<void> {
+  await browser.action.setBadgeText({ tabId: state.tabId, text: badgeText(state) });
+}
+
+async function updateAndPublish(params: {
+  tabId: number;
+  update: (state: TabState) => TabState;
+}): Promise<void> {
+  const state = await updateTabState(params);
+  await publishTabState(state);
+}
+
+async function reportTabError(params: { tabId: number; error: unknown }): Promise<void> {
+  const { tabId, error } = params;
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`Hunch capture failed for tab ${String(tabId)}`, error);
+  await updateAndPublish({ tabId, update: (state) => withError({ state, error: message }) });
+}
+
+async function enableTab(params: { tabId: number; streamId: Promise<string> }): Promise<void> {
+  const { tabId } = params;
+  // Starts fresh, so a late event from a previous session can't leak into this one.
+  await updateAndPublish({ tabId, update: () => createTabState(tabId) });
+  try {
+    const streamId = await params.streamId;
+    await ensureOffscreenDocument();
+    await sendOffscreenRequest({ target: 'offscreen', type: 'start', tabId, streamId });
+    await pingOffscreen();
+  } catch (error) {
+    await reportTabError({ tabId, error });
+  }
+}
+
+/** Stops a tab's capture and forgets its state. The tab must already be off in `tab-toggle`. */
+async function teardownTab(tabId: number): Promise<void> {
+  try {
+    await sendOffscreenRequest({ target: 'offscreen', type: 'stop', tabId });
+  } catch (error) {
+    // No offscreen document means there is nothing left to stop.
+    console.debug(`Hunch had no capture to stop for tab ${String(tabId)}`, error);
+  }
+  await clearTabState(tabId);
+  await closeOffscreenIfIdle();
+}
+
+async function handleActionClick(params: {
+  tabId: number;
+  streamId: Promise<string>;
+}): Promise<void> {
+  const isEnabled = await toggleTab(params.tabId);
+  if (isEnabled) {
+    await enableTab(params);
     return;
   }
-  await ensureOffscreenDocument();
-  await pingOffscreen();
+  await teardownTab(params.tabId);
 }
 
 async function handleTabRemoved(tabId: number): Promise<void> {
+  if (!(await isTabEnabled(tabId))) return;
   await removeTab(tabId);
-  await closeOffscreenIfIdle();
+  await teardownTab(tabId);
+}
+
+async function handleBackgroundMessage(message: BackgroundMessage): Promise<void> {
+  const { tabId } = message;
+  // Events can trail a tab being turned off; they belong to a session that no longer exists.
+  if (!(await isTabEnabled(tabId))) return;
+  if (message.type === 'capture-error') {
+    await reportTabError({ tabId, error: message.message });
+    return;
+  }
+  await updateAndPublish({
+    tabId,
+    update: (state) => applySessionEvent({ state, event: message.event, now: Date.now() }),
+  });
 }
 
 export default defineBackground(() => {
   browser.action.onClicked.addListener((tab) => {
     const tabId = tab.id;
     if (tabId === undefined) return;
-    handleActionClick(tabId).catch((error: unknown) => {
+    // tabCapture needs the invocation's grant, so ask in the click's own turn, before any await.
+    const streamId = browser.tabCapture.getMediaStreamId({ targetTabId: tabId });
+    // Marks the rejection handled until enableTab awaits it; turning off never does.
+    streamId.catch(() => undefined);
+    handleActionClick({ tabId, streamId }).catch((error: unknown) => {
       console.error(`Hunch failed to toggle tab ${String(tabId)}`, error);
     });
   });
@@ -43,6 +126,16 @@ export default defineBackground(() => {
   browser.tabs.onRemoved.addListener((tabId) => {
     handleTabRemoved(tabId).catch((error: unknown) => {
       console.error(`Hunch failed to clean up closed tab ${String(tabId)}`, error);
+    });
+  });
+
+  browser.runtime.onMessage.addListener((message) => {
+    if (!isBackgroundMessage(message)) return;
+    handleBackgroundMessage(message).catch((error: unknown) => {
+      console.error(
+        `Hunch failed to handle ${message.type} for tab ${String(message.tabId)}`,
+        error,
+      );
     });
   });
 });
