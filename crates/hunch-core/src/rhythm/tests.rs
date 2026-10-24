@@ -242,8 +242,8 @@ fn feature_names_match_weights() {
 }
 
 #[test]
-fn no_tempo_before_four_seconds() {
-    let detector = detect(&render(&BOOM_BAP, 120.0, 3.5));
+fn no_tempo_before_two_seconds() {
+    let detector = detect(&render(&BOOM_BAP, 120.0, 1.5));
     assert_eq!(detector.estimate(), TempoEstimate::NONE);
     assert!(detector.octave_candidates().is_empty());
 }

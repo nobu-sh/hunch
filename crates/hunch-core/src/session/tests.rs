@@ -146,7 +146,7 @@ fn tone_silence_tone_gives_two_windows() {
     assert_near(second.at_seconds, 6.0, "second start");
     assert_near(end_seconds(second), 11.0, "second end");
     assert!(!second.too_short);
-    assert!((4..=5).contains(&second.estimate_count));
+    assert!((9..=10).contains(&second.estimate_count));
 }
 
 #[test]
