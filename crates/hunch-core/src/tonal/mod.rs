@@ -6,8 +6,8 @@
 //! weighted separately), and the chroma is correlated with 24 major/minor key profiles. The bass
 //! notes also vote for the tonic. A logistic presence gate on tonalness and how key-like the chroma
 //! is decides whether to report a key at all (`hunch-eval key-sweep --fit-gate`). Confidence is a
-//! logistic calibration of how clearly the best key wins and how tonal the audio is, fitted by
-//! `hunch-eval key-sweep --calibrate`.
+//! logistic calibration of how clearly the best key wins, how tonal the audio is and how key-like
+//! the chroma is, fitted by `hunch-eval key-sweep --calibrate`.
 
 mod peaks;
 mod pitch_histogram;
@@ -36,12 +36,14 @@ const ANALYSIS_HIGH_HZ: f32 = 2500.0;
 const MAX_HIGH_HZ_RATIO: f32 = 0.45;
 /// Best-vs-rival correlation margin that counts as full separation.
 const FULL_SEPARATION_MARGIN: f32 = 0.15;
-/// `confidence = evidence · σ(BIAS + SEPARATION_WEIGHT · separation + TONALNESS_WEIGHT · tonalness)`,
-/// fitted on FSL10K train (min 15 s, default config) by `hunch-eval key-sweep --calibrate`, with
-/// atonal false keys counted wrong and given 20% of the weight.
-const CONFIDENCE_BIAS: f32 = -1.592;
-const CONFIDENCE_SEPARATION_WEIGHT: f32 = 1.479;
-const CONFIDENCE_TONALNESS_WEIGHT: f32 = 2.186;
+/// `confidence = evidence · σ(BIAS + SEPARATION_WEIGHT · separation + TONALNESS_WEIGHT ·
+/// tonalness + CLARITY_WEIGHT · clarity)`, fitted on FSL10K (min 15 s) and Beatport (30 s windows) train with
+/// the default config by `hunch-eval key-sweep --calibrate`. Atonal FSL10K false keys count as
+/// wrong and carry 20% of FSL10K's weight.
+const CONFIDENCE_BIAS: f32 = -4.772;
+const CONFIDENCE_SEPARATION_WEIGHT: f32 = 1.073;
+const CONFIDENCE_TONALNESS_WEIGHT: f32 = 0.813;
+const CONFIDENCE_CLARITY_WEIGHT: f32 = 5.035;
 /// `presence = σ(BIAS + TONALNESS_WEIGHT · tonalness + CLARITY_WEIGHT · clarity)`, fitted on train
 /// keyed sounds (FSL10K loops, Beatport 30 s windows) against FSL10K atonal loops, each group
 /// weighted equally, by `hunch-eval key-sweep --fit-gate`.
@@ -195,7 +197,8 @@ impl KeyDetector {
         let separation = (margin / FULL_SEPARATION_MARGIN).min(1.0);
         let logit = CONFIDENCE_BIAS
             + CONFIDENCE_SEPARATION_WEIGHT * separation
-            + CONFIDENCE_TONALNESS_WEIGHT * tonalness;
+            + CONFIDENCE_TONALNESS_WEIGHT * tonalness
+            + CONFIDENCE_CLARITY_WEIGHT * clarity;
         KeyEstimate {
             key: Some(ranking.best),
             confidence: evidence * sigmoid(logit),

@@ -890,6 +890,7 @@ const MIN_PROBABILITY: f64 = 1e-9;
 /// Share of the fitting weight given to atonal sounds that got a key. FSL10K over-represents drum
 /// loops; in the browser most audio is tonal.
 const ATONAL_WEIGHT_SHARE: f64 = 0.2;
+const CONFIDENCE_INPUTS: usize = 3;
 const RELIABILITY_BINS: usize = 10;
 const GATE_FIT_L2: f64 = 1e-3;
 /// Presence thresholds from 0 to 1 in this many steps are scored after fitting the gate.
@@ -897,8 +898,8 @@ const GATE_THRESHOLD_STEPS: usize = 20;
 
 /// A sound that got a key: keyed (right or wrong scale) or atonal (always wrong).
 struct CalibrationPoint {
-    separation: f32,
-    tonalness: f32,
+    /// Separation, tonalness and clarity, in `ConfidenceModel::weights` order.
+    inputs: [f64; CONFIDENCE_INPUTS],
     evidence: f32,
     is_correct: bool,
     is_atonal: bool,
@@ -906,7 +907,7 @@ struct CalibrationPoint {
 }
 
 /// Every keyed or atonal sound that gets a key at `threshold`, weighted so atonal sounds carry
-/// `ATONAL_WEIGHT_SHARE` of the total.
+/// `ATONAL_WEIGHT_SHARE` of the total. Pass one dataset at a time so the share holds within it.
 fn calibration_points(scored: &[&Scored], threshold: f32) -> Vec<CalibrationPoint> {
     let mut points: Vec<CalibrationPoint> = scored
         .iter()
@@ -919,8 +920,7 @@ fn calibration_points(scored: &[&Scored], threshold: f32) -> Vec<CalibrationPoin
                 None => return None,
             };
             Some(CalibrationPoint {
-                separation: outcome.separation,
-                tonalness: outcome.tonalness,
+                inputs: [outcome.separation, outcome.tonalness, outcome.clarity].map(f64::from),
                 evidence: outcome.evidence,
                 is_correct,
                 is_atonal: entry.is_atonal(),
@@ -939,20 +939,22 @@ fn calibration_points(scored: &[&Scored], threshold: f32) -> Vec<CalibrationPoin
     points
 }
 
-/// `evidence · σ(bias + separation_weight · separation + tonalness_weight · tonalness)`, the
-/// form `KeyDetector` uses for `confidence`.
+/// `evidence · σ(bias + weights · inputs)`, the form `KeyDetector` uses for `confidence`.
 #[derive(Debug, Clone, Copy)]
 struct ConfidenceModel {
     bias: f64,
-    separation_weight: f64,
-    tonalness_weight: f64,
+    weights: [f64; CONFIDENCE_INPUTS],
 }
 
 impl ConfidenceModel {
     fn confidence(&self, point: &CalibrationPoint) -> f64 {
         let logit = self.bias
-            + self.separation_weight * f64::from(point.separation)
-            + self.tonalness_weight * f64::from(point.tonalness);
+            + self
+                .weights
+                .iter()
+                .zip(&point.inputs)
+                .map(|(weight, input)| weight * input)
+                .sum::<f64>();
         f64::from(point.evidence) / (1.0 + (-logit).exp())
     }
 }
@@ -962,14 +964,13 @@ fn fit_confidence(points: &[CalibrationPoint]) -> ConfidenceModel {
     let total_weight: f64 = points.iter().map(|point| point.weight).sum();
     let mut model = ConfidenceModel {
         bias: 0.0,
-        separation_weight: 0.0,
-        tonalness_weight: 0.0,
+        weights: [0.0; CONFIDENCE_INPUTS],
     };
     if total_weight <= 0.0 {
         return model;
     }
     for _ in 0..CONFIDENCE_FIT_ITERATIONS {
-        let mut gradient = [0.0f64; 3];
+        let mut gradient = [0.0f64; CONFIDENCE_INPUTS + 1];
         for point in points {
             let evidence = f64::from(point.evidence);
             let sigmoid = model.confidence(point) / evidence.max(MIN_PROBABILITY);
@@ -980,15 +981,16 @@ fn fit_confidence(points: &[CalibrationPoint]) -> ConfidenceModel {
             // d(-log-likelihood)/dp · dp/dlogit, with p = evidence · σ(logit).
             let loss_slope = (probability - target) / (probability * (1.0 - probability));
             let pull = point.weight * loss_slope * evidence * sigmoid * (1.0 - sigmoid);
-            let inputs = [1.0, f64::from(point.separation), f64::from(point.tonalness)];
+            let inputs = std::iter::once(1.0).chain(point.inputs.iter().copied());
             for (g, x) in gradient.iter_mut().zip(inputs) {
                 *g += pull * x;
             }
         }
         let step = CONFIDENCE_FIT_STEP / total_weight;
         model.bias -= step * gradient[0];
-        model.separation_weight -= step * gradient[1];
-        model.tonalness_weight -= step * gradient[2];
+        for (weight, g) in model.weights.iter_mut().zip(&gradient[1..]) {
+            *weight -= step * g;
+        }
     }
     model
 }
@@ -1048,24 +1050,25 @@ fn calibrate(scored: &[Scored], threshold: f32) {
             .filter(|entry| corpus.is_none_or(|corpus| entry.item.corpus == corpus))
             .collect()
     };
-    let train = calibration_points(&split(Split::Train, None), threshold);
+    let train: Vec<CalibrationPoint> = corpora(scored)
+        .into_iter()
+        .flat_map(|corpus| calibration_points(&split(Split::Train, Some(corpus)), threshold))
+        .collect();
     let model = fit_confidence(&train);
     println!(
-        "confidence model fitted on {} train sounds of every dataset (atonal weight share {ATONAL_WEIGHT_SHARE}):",
+        "confidence model fitted on {} train sounds of every dataset (atonal weight share {ATONAL_WEIGHT_SHARE} within FSL10K):",
         train.len()
     );
     println!("  CONFIDENCE_BIAS: f32 = {:.3};", model.bias);
-    println!(
-        "  CONFIDENCE_SEPARATION_WEIGHT: f32 = {:.3};",
-        model.separation_weight
-    );
-    println!(
-        "  CONFIDENCE_TONALNESS_WEIGHT: f32 = {:.3};
-",
-        model.tonalness_weight
-    );
+    for (name, weight) in ["SEPARATION", "TONALNESS", "CLARITY"]
+        .iter()
+        .zip(model.weights)
+    {
+        println!("  CONFIDENCE_{name}_WEIGHT: f32 = {weight:.3};");
+    }
+    println!();
 
-    let uncalibrated = |point: &CalibrationPoint| f64::from(point.separation * point.evidence);
+    let uncalibrated = |point: &CalibrationPoint| point.inputs[0] * f64::from(point.evidence);
     let calibrated = |point: &CalibrationPoint| model.confidence(point);
     for (split_name, wanted) in [("train", Split::Train), ("val", Split::Val)] {
         for corpus in corpora(scored) {
@@ -1091,8 +1094,7 @@ fn calibrate(scored: &[Scored], threshold: f32) {
                 mean(points.iter().filter(|p| wanted(p)).map(calibrated))
             };
             println!(
-                "{name} mean calibrated confidence: correct keys {}%, wrong-scale keyed {}%, atonal false keys {}%
-",
+                "{name} mean calibrated confidence: correct keys {}%, wrong-scale keyed {}%, atonal false keys {}%\n",
                 pct(mean_where(|p| p.is_correct)),
                 pct(mean_where(|p| !p.is_correct && !p.is_atonal)),
                 pct(mean_where(|p| p.is_atonal)),
