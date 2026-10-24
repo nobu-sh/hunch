@@ -52,6 +52,9 @@ const GATE_TONALNESS_WEIGHT: f32 = 4.446;
 const GATE_CLARITY_WEIGHT: f32 = 4.198;
 /// Seconds of fully harmonic audio after which evidence stops limiting confidence (to ~63%).
 const EVIDENCE_TIME_CONSTANT_SECONDS: f32 = 2.0;
+/// Score lead a new key needs over the held one before it replaces it. Picked on validation
+/// timelines (`hunch-eval timeline`): halves how often the shown key changes at equal accuracy.
+const HOLD_MARGIN: f32 = 0.06;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeyEstimate {
@@ -163,6 +166,12 @@ impl KeyDetector {
     }
 
     pub fn estimate(&self) -> KeyEstimate {
+        self.estimate_holding(None)
+    }
+
+    /// Like `estimate`, but keeps `held` (the key shown so far) unless another key beats it by
+    /// more than `HOLD_MARGIN`. The presence gate still judges the best key.
+    pub fn estimate_holding(&self, held: Option<Key>) -> KeyEstimate {
         let tonalness = self.evidence.tonalness();
         let tuning = self.tuning_cents();
         let scoring = KeyScoring {
@@ -192,6 +201,10 @@ impl KeyDetector {
         if is_keyless {
             return no_key(presence, clarity);
         }
+        let ranking = match held {
+            Some(held) => ranking.holding(held, HOLD_MARGIN),
+            None => ranking,
+        };
 
         let margin = (ranking.best_score - ranking.rival_score).max(0.0);
         let separation = (margin / FULL_SEPARATION_MARGIN).min(1.0);
