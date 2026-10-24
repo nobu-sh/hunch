@@ -4,8 +4,10 @@
 //! resolution, weighted by how harmonic each frame is so drum hits barely count. At estimate time
 //! the histogram's tuning offset is found, it is folded into a 12-bin chroma (bass and treble
 //! weighted separately), and the chroma is correlated with 24 major/minor key profiles. The bass
-//! notes also vote for the tonic. Confidence is a logistic calibration of how clearly the best key
-//! wins and how tonal the audio is, fitted by `hunch-eval key-sweep --calibrate`.
+//! notes also vote for the tonic. A logistic presence gate on tonalness and how key-like the chroma
+//! is decides whether to report a key at all (`hunch-eval key-sweep --fit-gate`). Confidence is a
+//! logistic calibration of how clearly the best key wins and how tonal the audio is, fitted by
+//! `hunch-eval key-sweep --calibrate`.
 
 mod peaks;
 mod pitch_histogram;
@@ -40,6 +42,12 @@ const FULL_SEPARATION_MARGIN: f32 = 0.15;
 const CONFIDENCE_BIAS: f32 = -1.592;
 const CONFIDENCE_SEPARATION_WEIGHT: f32 = 1.479;
 const CONFIDENCE_TONALNESS_WEIGHT: f32 = 2.186;
+/// `presence = σ(BIAS + TONALNESS_WEIGHT · tonalness + CLARITY_WEIGHT · clarity)`, fitted on train
+/// keyed sounds (FSL10K loops, Beatport 30 s windows) against FSL10K atonal loops, each group
+/// weighted equally, by `hunch-eval key-sweep --fit-gate`.
+const GATE_BIAS: f32 = -3.368;
+const GATE_TONALNESS_WEIGHT: f32 = 4.446;
+const GATE_CLARITY_WEIGHT: f32 = 4.198;
 /// Seconds of fully harmonic audio after which evidence stops limiting confidence (to ~63%).
 const EVIDENCE_TIME_CONSTANT_SECONDS: f32 = 2.0;
 
@@ -49,12 +57,15 @@ pub struct KeyEstimate {
     pub key: Option<Key>,
     /// 0..=1, how likely `key` is the right scale (exact or relative). 0 when `key` is `None`.
     pub confidence: f32,
-    /// 0..=1, how pitched/harmonic the audio is. Used to decide whether to report a key at all.
+    /// 0..=1, how pitched/harmonic the audio is.
     pub tonalness: f32,
+    /// 0..=1, how likely the audio has a key at all, from tonalness and clarity. 0 when the chroma
+    /// is flat.
+    pub presence: f32,
     /// 0..=1, how clearly the best key beats keys with other notes. 0 when `key` is `None`.
     pub separation: f32,
     /// Correlation of the chroma with the best key's profile, plus its tonic cue: how key-like the
-    /// pitch content is. 0 when `key` is `None`.
+    /// pitch content is. 0 when the chroma is flat.
     pub clarity: f32,
     /// 0..=1, grows with the amount of harmonic audio heard.
     pub evidence: f32,
@@ -64,7 +75,9 @@ pub struct KeyEstimate {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KeyDetectorConfig {
     pub profile: KeyProfile,
-    /// Below this tonalness no key is reported.
+    /// Below this presence no key is reported.
+    pub presence_threshold: f32,
+    /// Below this tonalness no key is reported, whatever the presence.
     pub tonalness_threshold: f32,
     /// Weight of the bass chroma relative to the treble chroma; each is normalized first.
     pub bass_weight: f32,
@@ -89,7 +102,8 @@ impl Default for KeyDetectorConfig {
     fn default() -> Self {
         Self {
             profile: KeyProfile::default(),
-            tonalness_threshold: 0.2,
+            presence_threshold: 0.65,
+            tonalness_threshold: 0.0,
             bass_weight: 0.0,
             tonic_weight: 0.06,
             low_hz: 60.0,
@@ -156,16 +170,26 @@ impl KeyDetector {
         };
         let ranking = rank_keys(&self.chroma_at(tuning), scoring);
         let evidence = self.evidence.sufficiency();
-        let Some(ranking) = ranking.filter(|_| tonalness >= self.config.tonalness_threshold) else {
-            return KeyEstimate {
-                key: None,
-                confidence: 0.0,
-                tonalness,
-                separation: 0.0,
-                clarity: 0.0,
-                evidence,
-            };
+        let no_key = |presence: f32, clarity: f32| KeyEstimate {
+            key: None,
+            confidence: 0.0,
+            tonalness,
+            presence,
+            separation: 0.0,
+            clarity,
+            evidence,
         };
+        let Some(ranking) = ranking else {
+            return no_key(0.0, 0.0);
+        };
+        let clarity = ranking.best_score;
+        let presence =
+            sigmoid(GATE_BIAS + GATE_TONALNESS_WEIGHT * tonalness + GATE_CLARITY_WEIGHT * clarity);
+        let is_keyless = presence < self.config.presence_threshold
+            || tonalness < self.config.tonalness_threshold;
+        if is_keyless {
+            return no_key(presence, clarity);
+        }
 
         let margin = (ranking.best_score - ranking.rival_score).max(0.0);
         let separation = (margin / FULL_SEPARATION_MARGIN).min(1.0);
@@ -174,10 +198,11 @@ impl KeyDetector {
             + CONFIDENCE_TONALNESS_WEIGHT * tonalness;
         KeyEstimate {
             key: Some(ranking.best),
-            confidence: evidence / (1.0 + (-logit).exp()),
+            confidence: evidence * sigmoid(logit),
             tonalness,
+            presence,
             separation,
-            clarity: ranking.best_score,
+            clarity,
             evidence,
         }
     }
@@ -296,6 +321,10 @@ fn window_size_for(sample_rate: u32) -> usize {
     let target = (sample_rate as f32 * WINDOW_SECONDS).max(1.0);
     let exponent = target.log2().round() as u32;
     2usize.pow(exponent).clamp(MIN_WINDOW_SIZE, MAX_WINDOW_SIZE)
+}
+
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
 }
 
 /// `values` divided by their largest entry; unchanged when none is positive.

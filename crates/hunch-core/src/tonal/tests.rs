@@ -194,6 +194,29 @@ fn tonal_audio_is_more_tonal_than_drums() {
 }
 
 #[test]
+fn chords_pass_the_presence_gate_and_drums_do_not() {
+    let chords = detect(&progression(C_MAJOR, 0.0)).estimate();
+    let drums = detect(&drum_loop(8.0)).estimate();
+    let threshold = KeyDetectorConfig::default().presence_threshold;
+    assert!(chords.presence >= threshold, "{chords:?}");
+    assert!(drums.presence < threshold, "{drums:?}");
+}
+
+#[test]
+fn tonalness_threshold_still_applies_without_a_presence_gate() {
+    let config = KeyDetectorConfig {
+        presence_threshold: 0.0,
+        tonalness_threshold: 1.0,
+        ..KeyDetectorConfig::default()
+    };
+    let mut detector = KeyDetector::with_config(SAMPLE_RATE, config);
+    detector.push(&progression(C_MAJOR, 0.0));
+    let estimate = detector.estimate();
+    assert_eq!(estimate.key, None, "{estimate:?}");
+    assert!(estimate.presence > 0.0, "{estimate:?}");
+}
+
+#[test]
 fn silence_has_no_key() {
     let detector = detect(&vec![0.0; 3 * SAMPLE_RATE as usize]);
     let estimate = detector.estimate();

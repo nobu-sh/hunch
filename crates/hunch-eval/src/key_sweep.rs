@@ -11,6 +11,7 @@ use hunch_core::tonal::{KeyDetector, KeyDetectorConfig, KeyProfile};
 use hunch_core::{Key, Mode, PitchClass};
 use serde::{Deserialize, Serialize};
 
+use crate::fit::{self, CalibrationSample};
 use crate::fsl10k::Split;
 use crate::key_corpus::{self, Corpus, CorpusArgs, KeyItem, Window};
 use crate::metrics::{self, AtonalScore, KeyScore};
@@ -40,9 +41,9 @@ pub struct KeySweepArgs {
     #[arg(long, value_delimiter = ',', value_parser = parse_profile)]
     profile: Vec<KeyProfile>,
 
-    /// Tonalness thresholds, applied after the run (no re-analysis per threshold).
+    /// Presence thresholds, applied after the run (no re-analysis per threshold).
     #[arg(long, value_delimiter = ',')]
-    tonalness_threshold: Vec<f32>,
+    presence_threshold: Vec<f32>,
 
     #[arg(long, value_delimiter = ',')]
     bass_weight: Vec<f32>,
@@ -90,6 +91,11 @@ pub struct KeySweepArgs {
     #[arg(long)]
     fit_profile: bool,
 
+    /// Fit the key presence gate on train outcomes of the first config and score thresholds on
+    /// train and val (ignores `--split`).
+    #[arg(long)]
+    fit_gate: bool,
+
     #[arg(long, value_delimiter = ',', default_values_t = [0.01])]
     profile_l2: Vec<f64>,
 
@@ -120,7 +126,7 @@ fn parse_profile(name: &str) -> Result<KeyProfile, String> {
 /// Every combination of the listed values, falling back to the default for unlisted parameters.
 fn config_grid(args: &KeySweepArgs) -> Vec<KeyDetectorConfig> {
     let base = KeyDetectorConfig {
-        tonalness_threshold: 0.0,
+        presence_threshold: 0.0,
         ..KeyDetectorConfig::default()
     };
     let mut grid = vec![base];
@@ -174,12 +180,13 @@ fn describe(config: &KeyDetectorConfig) -> String {
     )
 }
 
-/// What one config reported for one sound, before the tonalness threshold.
+/// What one config reported for one sound, before the presence threshold.
 #[derive(Clone, Copy)]
 pub struct Outcome {
     pub key: Option<Key>,
     pub confidence: f32,
     pub tonalness: f32,
+    pub presence: f32,
     pub tuning_cents: f32,
     pub separation: f32,
     pub clarity: f32,
@@ -190,7 +197,7 @@ pub struct Outcome {
 
 impl Outcome {
     pub fn key_at(&self, threshold: f32) -> Option<Key> {
-        self.key.filter(|_| self.tonalness >= threshold)
+        self.key.filter(|_| self.presence >= threshold)
     }
 }
 
@@ -211,6 +218,7 @@ fn run_grid(samples: &[f32], grid: &[KeyDetectorConfig]) -> Vec<Outcome> {
                 key: estimate.key,
                 confidence: estimate.confidence,
                 tonalness: estimate.tonalness,
+                presence: estimate.presence,
                 tuning_cents: detector.tuning_cents(),
                 separation: estimate.separation,
                 clarity: estimate.clarity,
@@ -310,7 +318,7 @@ pub fn pct(value: Option<f64>) -> String {
 pub fn run(args: &KeySweepArgs) -> Result<(), String> {
     let started = Instant::now();
     // Calibration fits on train and checks on val, whatever `--split` says.
-    let needs_train_and_val = args.calibrate || args.fit_profile;
+    let needs_train_and_val = args.calibrate || args.fit_profile || args.fit_gate;
     let split = if needs_train_and_val {
         SplitChoice::All
     } else {
@@ -321,10 +329,10 @@ pub fn run(args: &KeySweepArgs) -> Result<(), String> {
         items.retain(|item| matches!(item.split, Split::Train | Split::Val));
     }
     let grid = config_grid(args);
-    let thresholds = if args.tonalness_threshold.is_empty() {
-        vec![KeyDetectorConfig::default().tonalness_threshold]
+    let thresholds = if args.presence_threshold.is_empty() {
+        vec![KeyDetectorConfig::default().presence_threshold]
     } else {
-        args.tonalness_threshold.clone()
+        args.presence_threshold.clone()
     };
     println!(
         "{} keyed/atonal sounds x {} configs x {} thresholds, window {}",
@@ -348,6 +356,9 @@ pub fn run(args: &KeySweepArgs) -> Result<(), String> {
     if args.calibrate {
         calibrate(&scored, thresholds[0]);
         return Ok(());
+    }
+    if args.fit_gate {
+        return fit_gate(&scored);
     }
     if args.fit_profile {
         fit_profiles(&scored, &grid[0], thresholds[0], args);
@@ -506,7 +517,7 @@ fn print_table(input: &TableInput) {
 }
 
 /// Keyed sounds that are same-scale under `candidate` but not `reference`, and the reverse.
-/// Each side is a (config index, tonalness threshold) pair.
+/// Each side is a (config index, presence threshold) pair.
 fn paired_same_scale(
     scored: &[&Scored],
     reference: (usize, f32),
@@ -725,7 +736,7 @@ fn print_analysis(
     threshold: f32,
     instrumentation: &BTreeMap<u64, Vec<&'static str>>,
 ) {
-    println!("\nerror analysis, config 0 at tonalness {threshold}:");
+    println!("\nerror analysis, config 0 at presence {threshold}:");
     let keyed: Vec<(&Scored, Key, Outcome)> = scored
         .iter()
         .filter_map(|entry| {
@@ -880,6 +891,9 @@ const MIN_PROBABILITY: f64 = 1e-9;
 /// loops; in the browser most audio is tonal.
 const ATONAL_WEIGHT_SHARE: f64 = 0.2;
 const RELIABILITY_BINS: usize = 10;
+const GATE_FIT_L2: f64 = 1e-3;
+/// Presence thresholds from 0 to 1 in this many steps are scored after fitting the gate.
+const GATE_THRESHOLD_STEPS: usize = 20;
 
 /// A sound that got a key: keyed (right or wrong scale) or atonal (always wrong).
 struct CalibrationPoint {
@@ -1114,7 +1128,7 @@ fn profile_scores(
             Some((
                 model.predict(sample),
                 entry.labels()?,
-                entry.result.outcomes[0].tonalness,
+                entry.result.outcomes[0].presence,
             ))
         })
         .collect();
@@ -1124,8 +1138,8 @@ fn profile_scores(
             .map(|(key, labels, _)| (Some(*key), *labels)),
     );
     let gated =
-        KeyScore::from_alternatives(predictions.iter().map(|(key, labels, tonalness)| {
-            (Some(*key).filter(|_| *tonalness >= threshold), *labels)
+        KeyScore::from_alternatives(predictions.iter().map(|(key, labels, presence)| {
+            (Some(*key).filter(|_| *presence >= threshold), *labels)
         }));
     (ungated, gated)
 }
@@ -1188,7 +1202,7 @@ fn fit_profiles(
         );
         train.extend(samples);
     }
-    println!("same/exact/MIREX ungated, same-scale gated at tonalness {threshold}:");
+    println!("same/exact/MIREX ungated, same-scale gated at presence {threshold}:");
     print_profile_scores(&format!("{profile:?}"), &prior, scored, threshold);
     let settings = args.profile_l2.iter().flat_map(|&l2| {
         args.profile_exact_share
@@ -1235,6 +1249,7 @@ struct OutcomeRow {
     same_scale: bool,
     exact: bool,
     tonalness: f32,
+    presence: f32,
     separation: f32,
     clarity: f32,
     evidence: f32,
@@ -1267,6 +1282,7 @@ fn write_outcomes_csv(path: &Path, scored: &[Scored]) -> Result<(), String> {
                 .is_some_and(|key| metrics::is_same_scale_as_any(key, labels)),
             exact: outcome.key.is_some_and(|key| labels.contains(&key)),
             tonalness: outcome.tonalness,
+            presence: outcome.presence,
             separation: outcome.separation,
             clarity: outcome.clarity,
             evidence: outcome.evidence,
@@ -1280,4 +1296,89 @@ fn write_outcomes_csv(path: &Path, scored: &[Scored]) -> Result<(), String> {
     writer
         .flush()
         .map_err(|error| format!("cannot write {}: {error}", path.display()))
+}
+
+/// Inputs of the key presence gate, in the order `KeyDetector` weights them.
+fn gate_inputs(outcome: &Outcome) -> Vec<f64> {
+    [outcome.tonalness, outcome.clarity].map(f64::from).to_vec()
+}
+
+/// Fits the presence gate on train: keyed sounds (any dataset) against FSL10K atonal ones, each
+/// group carrying an equal share, then scores a range of thresholds on train and val.
+fn fit_gate(scored: &[Scored]) -> Result<(), String> {
+    let train: Vec<&Scored> = scored
+        .iter()
+        .filter(|entry| entry.item.split == Split::Train)
+        .collect();
+    let group_of = |entry: &Scored| (entry.item.corpus, entry.is_atonal());
+    let mut group_sizes: BTreeMap<(Corpus, bool), usize> = BTreeMap::new();
+    for entry in &train {
+        *group_sizes.entry(group_of(entry)).or_default() += 1;
+    }
+    let samples: Vec<CalibrationSample> = train
+        .iter()
+        .filter(|entry| entry.result.outcomes[0].key.is_some())
+        .map(|entry| CalibrationSample {
+            inputs: gate_inputs(&entry.result.outcomes[0]),
+            is_correct: !entry.is_atonal(),
+            weight: 1.0 / group_sizes[&group_of(entry)] as f64,
+        })
+        .collect();
+    let gate = fit::fit_calibration(&samples, GATE_FIT_L2)?;
+    println!(
+        "presence gate fitted on {} train sounds, groups {group_sizes:?}:",
+        samples.len()
+    );
+    println!("  GATE_BIAS: f32 = {:.3};", gate.bias);
+    for (name, weight) in ["TONALNESS", "CLARITY"].iter().zip(&gate.weights) {
+        println!("  GATE_{name}_WEIGHT: f32 = {weight:.3};");
+    }
+
+    let presence = |entry: &Scored| -> f64 {
+        let outcome = &entry.result.outcomes[0];
+        if outcome.key.is_none() {
+            return 0.0;
+        }
+        gate.probability(&gate_inputs(outcome))
+    };
+    for split in [Split::Train, Split::Val] {
+        println!(
+            "\n{split}: presence threshold, then per dataset coverage / same-scale (/ false-key)"
+        );
+        for step in 0..=GATE_THRESHOLD_STEPS {
+            let threshold = step as f64 / GATE_THRESHOLD_STEPS as f64;
+            let mut cells = Vec::new();
+            for corpus in corpora(scored) {
+                let entries: Vec<&Scored> = subset(scored, corpus)
+                    .into_iter()
+                    .filter(|entry| entry.item.split == split)
+                    .collect();
+                let gated = |entry: &&Scored| {
+                    entry.result.outcomes[0]
+                        .key
+                        .filter(|_| presence(entry) >= threshold)
+                };
+                let key = KeyScore::from_alternatives(
+                    entries
+                        .iter()
+                        .filter_map(|entry| Some((gated(entry), entry.labels()?))),
+                );
+                let atonal = AtonalScore::from_predictions(
+                    entries.iter().filter(|entry| entry.is_atonal()).map(gated),
+                );
+                let false_key = if atonal.sounds > 0 {
+                    format!(" / {}", pct(atonal.false_key_rate))
+                } else {
+                    String::new()
+                };
+                cells.push(format!(
+                    "{corpus} {} / {}{false_key}",
+                    pct(key.coverage),
+                    pct(key.same_scale)
+                ));
+            }
+            println!("  {threshold:.2}  {}", cells.join(" | "));
+        }
+    }
+    Ok(())
 }

@@ -283,6 +283,8 @@ fn line_search(
 pub struct CalibrationSample {
     pub inputs: Vec<f64>,
     pub is_correct: bool,
+    /// Share of the loss relative to the other samples.
+    pub weight: f64,
 }
 
 /// Logistic map from confidence inputs to the probability the estimate is right.
@@ -298,7 +300,7 @@ impl Calibration {
     }
 }
 
-/// Fits `Calibration` by Newton's method on the mean log-loss plus `l2 / 2 · |weights|²`.
+/// Fits `Calibration` by Newton's method on the weighted mean log-loss plus `l2 / 2 · |weights|²`.
 pub fn fit_calibration(samples: &[CalibrationSample], l2: f64) -> Result<Calibration, String> {
     let Some(first) = samples.first() else {
         return Err("no sounds to calibrate on".to_string());
@@ -318,19 +320,23 @@ pub fn fit_calibration(samples: &[CalibrationSample], l2: f64) -> Result<Calibra
             .collect()
     };
     let rows: Vec<Vec<f64>> = samples.iter().map(with_bias).collect();
-    let count = samples.len() as f64;
+    let total_weight: f64 = samples.iter().map(|sample| sample.weight).sum();
+    if total_weight <= 0.0 {
+        return Err("calibration samples have no weight".to_string());
+    }
     let mut parameters = vec![0.0; dimensions];
     for _ in 0..NEWTON_ITERATIONS {
         let mut gradient = vec![0.0; dimensions];
         let mut hessian = vec![vec![0.0; dimensions]; dimensions];
         for (row, sample) in rows.iter().zip(samples) {
             let probability = sigmoid(dot(row, &parameters));
+            let share = sample.weight / total_weight;
             let residual = probability - f64::from(u8::from(sample.is_correct));
             let curvature = probability * (1.0 - probability);
             for i in 0..dimensions {
-                gradient[i] += residual * row[i] / count;
+                gradient[i] += share * residual * row[i];
                 for j in 0..dimensions {
-                    hessian[i][j] += curvature * row[i] * row[j] / count;
+                    hessian[i][j] += share * curvature * row[i] * row[j];
                 }
             }
         }
@@ -535,6 +541,7 @@ mod tests {
                 CalibrationSample {
                     inputs: vec![x],
                     is_correct: rng.uniform() < probability,
+                    weight: 1.0,
                 }
             })
             .collect();
@@ -552,6 +559,7 @@ mod tests {
             .map(|is_correct| CalibrationSample {
                 inputs: vec![1.0],
                 is_correct,
+                weight: 1.0,
             })
             .into();
         assert!(fit_calibration(&samples, 0.0).is_err());
