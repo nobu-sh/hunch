@@ -62,6 +62,11 @@ impl Analyzer {
         self.samples_since_estimate = 0;
     }
 
+    /// The estimate for everything pushed so far, regardless of the push cadence.
+    pub fn current(&self) -> Estimate {
+        self.estimate()
+    }
+
     fn estimate(&self) -> Estimate {
         let key = self.key.estimate();
         let tempo = self.tempo.estimate();

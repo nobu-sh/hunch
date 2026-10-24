@@ -10,6 +10,9 @@ pub struct TempoEstimate {
     pub alternate: Option<f32>,
 }
 
+/// Names of `OctaveCandidate::features`, in order. Fitted weights are keyed by these.
+pub const OCTAVE_FEATURE_NAMES: &[&str] = &[];
+
 /// One tempo-octave candidate and the features the octave decision scores it with.
 /// Exposed so `hunch-eval` can dump features and fit the decision weights offline.
 #[derive(Debug, Clone, PartialEq)]
