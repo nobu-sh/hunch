@@ -16,36 +16,40 @@ function estimate(overrides: Partial<Estimate> = {}): Estimate {
 }
 
 describe('isBpmLocked', () => {
-  it('locks after three confident estimates with the same rounded bpm', () => {
-    const estimates = [141.8, 142.1, 142.3].map((bpm) => estimate({ bpm }));
+  it('locks after two confident estimates with about the same bpm', () => {
+    const estimates = [141.2, 143.4].map((bpm) => estimate({ bpm }));
 
     expect(isBpmLocked(estimates)).toBe(true);
   });
 
-  it('needs three estimates', () => {
-    expect(isBpmLocked([estimate(), estimate()])).toBe(false);
+  it('needs two estimates', () => {
+    expect(isBpmLocked([estimate()])).toBe(false);
   });
 
-  it('does not lock while the rounded bpm changes', () => {
-    const estimates = [142, 142, 143].map((bpm) => estimate({ bpm }));
+  it('does not lock while the bpm moves more than 2%', () => {
+    const estimates = [138, 142].map((bpm) => estimate({ bpm }));
 
     expect(isBpmLocked(estimates)).toBe(false);
   });
 
   it('does not lock below the confidence threshold', () => {
-    const estimates = [estimate(), estimate(), estimate({ bpmConfidence: 0.59 })];
+    const estimates = [estimate(), estimate({ bpmConfidence: 0.64 })];
 
     expect(isBpmLocked(estimates)).toBe(false);
   });
 
   it('does not lock without a bpm', () => {
-    const estimates = [estimate({ bpm: null }), estimate({ bpm: null }), estimate({ bpm: null })];
+    const estimates = [estimate({ bpm: null }), estimate({ bpm: null })];
 
     expect(isBpmLocked(estimates)).toBe(false);
   });
 
+  it('does not lock right after the bpm appears', () => {
+    expect(isBpmLocked([estimate({ bpm: null }), estimate()])).toBe(false);
+  });
+
   it('only looks at the latest streak', () => {
-    const estimates = [100, 142, 142, 142].map((bpm) => estimate({ bpm }));
+    const estimates = [100, 142, 142].map((bpm) => estimate({ bpm }));
 
     expect(isBpmLocked(estimates)).toBe(true);
   });
@@ -53,7 +57,7 @@ describe('isBpmLocked', () => {
 
 describe('isKeyLocked', () => {
   it('locks after three confident estimates with the same key', () => {
-    expect(isKeyLocked([estimate(), estimate(), estimate({ keyConfidence: 0.55 })])).toBe(true);
+    expect(isKeyLocked([estimate(), estimate(), estimate({ keyConfidence: 0.6 })])).toBe(true);
   });
 
   it('does not lock while the scale changes', () => {
@@ -69,7 +73,11 @@ describe('isKeyLocked', () => {
   });
 
   it('does not lock below the confidence threshold', () => {
-    expect(isKeyLocked([estimate(), estimate(), estimate({ keyConfidence: 0.5 })])).toBe(false);
+    expect(isKeyLocked([estimate(), estimate(), estimate({ keyConfidence: 0.59 })])).toBe(false);
+  });
+
+  it('needs three estimates', () => {
+    expect(isKeyLocked([estimate(), estimate()])).toBe(false);
   });
 
   it('does not lock without a key', () => {
