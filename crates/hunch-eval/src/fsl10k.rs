@@ -1,5 +1,6 @@
 //! Freesound Loop Dataset (FSL10K) loader: metadata, expert annotations, labels and splits.
 
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::fs;
@@ -25,17 +26,44 @@ pub enum Split {
 impl Split {
     pub const ALL: [Split; 3] = [Split::Train, Split::Val, Split::Test];
 
-    /// Deterministic split for a creator, so one creator's loops never straddle splits.
-    pub fn for_username(username: &str) -> Self {
-        let bucket = fnv1a(username.as_bytes()) % 100;
-        if bucket < TRAIN_PERCENT {
-            Split::Train
-        } else if bucket < TRAIN_PERCENT + VAL_PERCENT {
-            Split::Val
-        } else {
-            Split::Test
+    /// Target share of all sounds, in percent.
+    fn target_percent(self) -> u64 {
+        match self {
+            Split::Train => TRAIN_PERCENT,
+            Split::Val => VAL_PERCENT,
+            Split::Test => 100 - TRAIN_PERCENT - VAL_PERCENT,
         }
     }
+}
+
+/// Assigns every creator to one split, so one creator's loops never straddle splits.
+///
+/// Hashing creators straight into buckets lets one prolific creator (one has ~1,650 loops) skew a
+/// split badly. Instead creators are placed largest first, each into the split furthest below its
+/// target share. Equal sizes are ordered by FNV-1a of the name, so the result is deterministic.
+pub fn assign_splits<'a>(usernames: impl IntoIterator<Item = &'a str>) -> HashMap<&'a str, Split> {
+    let mut sizes: HashMap<&str, u64> = HashMap::new();
+    for username in usernames {
+        *sizes.entry(username).or_default() += 1;
+    }
+    let total: u64 = sizes.values().sum();
+    let mut creators: Vec<(&str, u64)> = sizes.into_iter().collect();
+    creators.sort_by_key(|&(name, size)| (Reverse(size), fnv1a(name.as_bytes())));
+
+    let mut filled = [0u64; 3];
+    let mut splits = HashMap::with_capacity(creators.len());
+    for (name, size) in creators {
+        // Shortfall from the target, scaled by 100 to stay in integers.
+        let shortfall = |index: usize| {
+            (Split::ALL[index].target_percent() * total) as i64 - (filled[index] * 100) as i64
+        };
+        let index = (0..Split::ALL.len())
+            .max_by_key(|&index| (shortfall(index), Reverse(index)))
+            .unwrap_or(0);
+        filled[index] += size;
+        splits.insert(name, Split::ALL[index]);
+    }
+    splits
 }
 
 impl fmt::Display for Split {
@@ -169,13 +197,21 @@ impl Dataset {
             let genres = merge_genres(parent_genres.get(&id_text), expert);
             sounds.push(Sound {
                 id,
-                split: Split::for_username(&entry.username),
+                split: Split::Train,
                 username: entry.username,
                 audio_path: audio_path.clone(),
                 labels: resolve_labels(entry.annotations.bpm, expert),
                 is_hip_hop: genres.contains(HIP_HOP_GENRE),
                 genres,
             });
+        }
+        let splits: HashMap<String, Split> =
+            assign_splits(sounds.iter().map(|sound| sound.username.as_str()))
+                .into_iter()
+                .map(|(name, split)| (name.to_string(), split))
+                .collect();
+        for sound in &mut sounds {
+            sound.split = splits[sound.username.as_str()];
         }
         sounds.sort_by_key(|sound| sound.id);
         missing_audio.sort_unstable();
@@ -483,10 +519,30 @@ mod tests {
     }
 
     #[test]
-    fn splits_are_stable_per_username() {
+    fn fnv1a_matches_reference_values() {
         assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
-        assert_eq!(Split::for_username("Erokia"), Split::for_username("Erokia"));
+    }
+
+    #[test]
+    fn splits_keep_creators_whole_and_balance_sizes() {
+        // One dominant creator plus many small ones, like FSL10K.
+        let mut names: Vec<String> = vec!["big".to_string(); 300];
+        names.extend((0..700).map(|i| format!("creator{}", i % 140)));
+        let splits = assign_splits(names.iter().map(String::as_str));
+
+        assert_eq!(splits["big"], Split::Train);
+        let mut counts = [0usize; 3];
+        for name in &names {
+            counts[Split::ALL
+                .iter()
+                .position(|s| *s == splits[name.as_str()])
+                .unwrap()] += 1;
+        }
+        assert!((680..=720).contains(&counts[0]), "{counts:?}");
+        assert!((130..=170).contains(&counts[1]), "{counts:?}");
+        assert!((130..=170).contains(&counts[2]), "{counts:?}");
+        assert_eq!(assign_splits(names.iter().map(String::as_str)), splits);
     }
 
     #[test]
