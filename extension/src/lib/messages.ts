@@ -4,6 +4,7 @@ export interface Estimate {
   keyConfidence: number;
   bpm: number | null;
   bpmConfidence: number;
+  bpmAlternate: number | null;
   secondsAnalyzed: number;
 }
 

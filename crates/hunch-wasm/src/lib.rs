@@ -10,6 +10,7 @@ export interface Estimate {
   keyConfidence: number;
   bpm: number | null;
   bpmConfidence: number;
+  bpmAlternate: number | null;
   secondsAnalyzed: number;
 }
 "#;
@@ -27,6 +28,7 @@ struct EstimateDto {
     key_confidence: f32,
     bpm: Option<f32>,
     bpm_confidence: f32,
+    bpm_alternate: Option<f32>,
     seconds_analyzed: f32,
 }
 
@@ -37,6 +39,7 @@ impl From<hunch_core::Estimate> for EstimateDto {
             key_confidence: estimate.key_confidence,
             bpm: estimate.bpm,
             bpm_confidence: estimate.bpm_confidence,
+            bpm_alternate: estimate.bpm_alternate,
             seconds_analyzed: estimate.seconds_analyzed,
         }
     }
