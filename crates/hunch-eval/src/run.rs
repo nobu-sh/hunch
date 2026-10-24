@@ -54,12 +54,20 @@ pub fn par_map_sounds<T: Send>(
     sounds: &[&Sound],
     job: impl Fn(&Sound) -> Result<T, String> + Sync,
 ) -> Vec<Result<T, String>> {
+    par_map(sounds, |sound| job(sound))
+}
+
+/// Runs `job` over `items` in parallel, keeping input order and printing progress to stderr.
+pub fn par_map<I: Sync, T: Send>(
+    items: &[I],
+    job: impl Fn(&I) -> Result<T, String> + Sync,
+) -> Vec<Result<T, String>> {
     let done = AtomicUsize::new(0);
-    let total = sounds.len();
-    sounds
+    let total = items.len();
+    items
         .par_iter()
-        .map(|sound| {
-            let result = job(sound);
+        .map(|item| {
+            let result = job(item);
             let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
             if finished % PROGRESS_EVERY == 0 {
                 eprintln!("  {finished}/{total} sounds");

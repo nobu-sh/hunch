@@ -151,6 +151,18 @@ pub fn is_same_scale(predicted: Key, label: Key) -> bool {
     predicted == label || is_relative(predicted, label)
 }
 
+/// The best MIREX score `predicted` gets against any of `labels`; 0 when there are none.
+pub fn best_mirex_score(predicted: Key, labels: &[Key]) -> f64 {
+    labels
+        .iter()
+        .map(|&label| mirex_score(predicted, label))
+        .fold(0.0, f64::max)
+}
+
+pub fn is_same_scale_as_any(predicted: Key, labels: &[Key]) -> bool {
+    labels.iter().any(|&label| is_same_scale(predicted, label))
+}
+
 #[derive(Debug, Serialize)]
 pub struct KeyScore {
     pub sounds: usize,
@@ -164,17 +176,30 @@ pub struct KeyScore {
 
 impl KeyScore {
     pub fn from_predictions(pairs: impl IntoIterator<Item = (Option<Key>, Key)>) -> Self {
+        let pairs: Vec<(Option<Key>, Key)> = pairs.into_iter().collect();
+        Self::from_alternatives(
+            pairs
+                .iter()
+                .map(|(predicted, label)| (*predicted, std::slice::from_ref(label))),
+        )
+    }
+
+    /// Like `from_predictions`, but each sound lists every key that counts as correct; each
+    /// metric takes the alternative that scores best.
+    pub fn from_alternatives<'a>(
+        pairs: impl IntoIterator<Item = (Option<Key>, &'a [Key])>,
+    ) -> Self {
         let (mut sounds, mut covered, mut same_scale, mut exact) = (0, 0, 0, 0);
         let mut mirex_total = 0.0;
-        for (predicted, label) in pairs {
+        for (predicted, labels) in pairs {
             sounds += 1;
             let Some(predicted) = predicted else {
                 continue;
             };
             covered += 1;
-            mirex_total += mirex_score(predicted, label);
-            same_scale += usize::from(is_same_scale(predicted, label));
-            exact += usize::from(predicted == label);
+            mirex_total += best_mirex_score(predicted, labels);
+            same_scale += usize::from(is_same_scale_as_any(predicted, labels));
+            exact += usize::from(labels.contains(&predicted));
         }
         Self {
             sounds,
@@ -234,6 +259,28 @@ pub fn calibrate(points: impl IntoIterator<Item = (f32, bool)>) -> Vec<Calibrati
             accuracy: ratio(correct[bin], counts[bin]),
         })
         .collect()
+}
+
+/// Weighted expected calibration error over `CALIBRATION_BINS` equal-width bins: the
+/// weight-averaged |accuracy − mean confidence| per bin. Points are (confidence, correct, weight).
+pub fn expected_calibration_error(
+    points: impl IntoIterator<Item = (f64, bool, f64)>,
+) -> Option<f64> {
+    // Per bin: (weight, weighted confidence, weighted correct).
+    let mut bins = [(0.0f64, 0.0f64, 0.0f64); CALIBRATION_BINS];
+    for (confidence, is_correct, weight) in points {
+        let bin = ((confidence.clamp(0.0, 1.0) * CALIBRATION_BINS as f64) as usize)
+            .min(CALIBRATION_BINS - 1);
+        bins[bin].0 += weight;
+        bins[bin].1 += weight * confidence;
+        bins[bin].2 += weight * f64::from(u8::from(is_correct));
+    }
+    let total_weight: f64 = bins.iter().map(|bin| bin.0).sum();
+    let gap: f64 = bins
+        .iter()
+        .map(|(_, conf, correct)| (correct - conf).abs())
+        .sum();
+    (total_weight > 0.0).then(|| gap / total_weight)
 }
 
 /// Seconds of audio after which the estimate became correct and stayed correct,
@@ -369,6 +416,29 @@ mod tests {
         assert_eq!(score.exact, Some(1.0 / 3.0));
         let mirex = score.mirex.expect("mirex");
         assert!((mirex - 1.3 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn key_score_takes_the_best_alternative() {
+        let labels = [key(7, Mode::Major), key(9, Mode::Minor)];
+        let score = KeyScore::from_alternatives([
+            (Some(key(0, Mode::Major)), &labels[..]),
+            (Some(key(7, Mode::Major)), &labels[..]),
+        ]);
+        assert_eq!(score.exact, Some(0.5));
+        assert_eq!(score.same_scale, Some(1.0));
+        let mirex = score.mirex.expect("mirex");
+        // C major: fifth of G major (0.5) beats relative of A minor (0.3).
+        assert!((mirex - 1.5 / 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn calibration_error_is_weighted_gap_per_bin() {
+        let perfect = expected_calibration_error([(0.95, true, 1.0), (0.05, false, 1.0)]);
+        assert!(perfect.expect("ece") < 0.051);
+        let overconfident = expected_calibration_error([(0.9, false, 3.0), (0.9, true, 1.0)]);
+        assert!((overconfident.expect("ece") - 0.65).abs() < 1e-9);
+        assert_eq!(expected_calibration_error([]), None);
     }
 
     #[test]

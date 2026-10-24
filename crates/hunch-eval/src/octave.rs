@@ -341,6 +341,7 @@ fn calibration_samples(table: &FeatureTable, model: &OctaveModel) -> Vec<Calibra
                     .map(f64::from)
                     .to_vec(),
                 is_correct: set.is_correct[winner],
+                weight: 1.0,
             })
         })
         .collect()
