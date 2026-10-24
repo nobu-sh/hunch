@@ -11,6 +11,8 @@ export const OVERLAY_CSS = `
   --amber: #f2b84b;
   --green: #4fd18b;
   --red: #ff6b6b;
+  --scrollbar: rgba(244, 244, 246, 0.18);
+  --scrollbar-hover: rgba(244, 244, 246, 0.32);
 }
 * { box-sizing: border-box; }
 .root {
@@ -82,6 +84,17 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 [hidden] { display: none !important; }
 .history-title { padding: 0 8px 4px; }
 .history ol { list-style: none; margin: 0; padding: 0; max-height: 156px; overflow-y: auto; }
+/* WebKit pseudo-elements rather than scrollbar-color, which can't round or inset the thumb. */
+.history ol::-webkit-scrollbar { width: 8px; }
+.history ol::-webkit-scrollbar-track { background: transparent; }
+.history ol::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-clip: padding-box;
+}
+.history ol::-webkit-scrollbar-thumb:hover { background-color: var(--scrollbar-hover); }
+.history ol::-webkit-scrollbar-button { display: none; }
 .history li {
   display: grid;
   grid-template-columns: 44px 1fr 40px auto;
