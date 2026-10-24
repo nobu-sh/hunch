@@ -1,4 +1,6 @@
 use crate::Key;
+use crate::rhythm::TempoDetector;
+use crate::tonal::KeyDetector;
 
 /// How much newly pushed audio, in seconds, is needed before the next estimate.
 const ESTIMATE_INTERVAL_SECONDS: u32 = 1;
@@ -9,13 +11,16 @@ pub struct Estimate {
     pub key_confidence: f32,
     pub bpm: Option<f32>,
     pub bpm_confidence: f32,
+    /// The other likely tempo octave, shown next to `bpm` when the octave call is unsure.
+    pub bpm_alternate: Option<f32>,
     pub seconds_analyzed: f32,
 }
 
 /// Streaming analyzer: push mono audio in chunks, get estimates back as it refines.
-#[derive(Debug, Clone)]
 pub struct Analyzer {
     sample_rate: u32,
+    key: KeyDetector,
+    tempo: TempoDetector,
     samples_per_estimate: u64,
     total_samples: u64,
     samples_since_estimate: u64,
@@ -27,6 +32,8 @@ impl Analyzer {
         let sample_rate = sample_rate.max(1);
         Self {
             sample_rate,
+            key: KeyDetector::new(sample_rate),
+            tempo: TempoDetector::new(sample_rate),
             samples_per_estimate: u64::from(sample_rate) * u64::from(ESTIMATE_INTERVAL_SECONDS),
             total_samples: 0,
             samples_since_estimate: 0,
@@ -35,6 +42,8 @@ impl Analyzer {
 
     /// Mono f32 samples in [-1, 1]. Returns an estimate at most once per ~1 s of newly pushed audio.
     pub fn push(&mut self, samples: &[f32]) -> Option<Estimate> {
+        self.key.push(samples);
+        self.tempo.push(samples);
         let pushed = samples.len() as u64;
         self.total_samples += pushed;
         self.samples_since_estimate += pushed;
@@ -47,16 +56,21 @@ impl Analyzer {
     }
 
     pub fn reset(&mut self) {
+        self.key.reset();
+        self.tempo.reset();
         self.total_samples = 0;
         self.samples_since_estimate = 0;
     }
 
     fn estimate(&self) -> Estimate {
+        let key = self.key.estimate();
+        let tempo = self.tempo.estimate();
         Estimate {
-            key: None,
-            key_confidence: 0.0,
-            bpm: None,
-            bpm_confidence: 0.0,
+            key: key.key,
+            key_confidence: key.confidence,
+            bpm: tempo.bpm,
+            bpm_confidence: tempo.confidence,
+            bpm_alternate: tempo.alternate,
             seconds_analyzed: self.total_samples as f32 / self.sample_rate as f32,
         }
     }
