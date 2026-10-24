@@ -170,6 +170,42 @@ fn candidates_include_half_and_double_with_finite_features() {
 }
 
 #[test]
+fn loop_tempi_have_power_of_two_beats_per_loop() {
+    let two_second_loop = Repetition {
+        lag: 200.0,
+        strength: 0.99,
+    };
+    assert_eq!(loop_tempi(two_second_loop, 100.0), vec![60.0, 120.0, 240.0]);
+
+    let weak = Repetition {
+        strength: 0.3,
+        ..two_second_loop
+    };
+    assert!(loop_tempi(weak, 100.0).is_empty());
+}
+
+#[test]
+fn loop_tempi_lead_the_candidates() {
+    let three_quarter_pulse = Period {
+        lag: 100.0 * 60.0 / 90.0,
+        strength: 0.8,
+    };
+    let tempi = candidate_tempi(CandidateSources {
+        periods: &[three_quarter_pulse],
+        repetition: Some(Repetition {
+            lag: 200.0,
+            strength: 0.99,
+        }),
+        frame_rate: 100.0,
+    });
+    assert!(tempi.contains(&120.0), "{tempi:?}");
+    assert!(
+        tempi.iter().any(|&bpm| (bpm - 90.0).abs() < 0.01),
+        "{tempi:?}"
+    );
+}
+
+#[test]
 fn feature_names_match_weights() {
     assert_eq!(
         OCTAVE_FEATURE_NAMES.len(),

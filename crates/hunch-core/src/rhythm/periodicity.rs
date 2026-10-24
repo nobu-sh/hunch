@@ -167,7 +167,7 @@ fn search_prior(lag: f32, frame_rate: f32) -> f32 {
 }
 
 /// Vertex offset of the parabola through three equally spaced points, clamped to ±0.5.
-fn parabolic_offset([left, center, right]: [f32; 3]) -> f32 {
+pub fn parabolic_offset([left, center, right]: [f32; 3]) -> f32 {
     let curvature = left - 2.0 * center + right;
     if curvature >= 0.0 {
         return 0.0;

@@ -9,10 +9,12 @@ mod features;
 mod octave_weights;
 mod onset;
 mod periodicity;
+mod repetition;
 
-use self::features::{BeatEvidence, FEATURE_COUNT, FEATURE_NAMES};
+use self::features::{BeatEvidence, EvidenceInput, FEATURE_COUNT, FEATURE_NAMES};
 use self::onset::{Band, OnsetEnvelopes};
 use self::periodicity::{LagRange, Period, bpm_to_lag, lag_to_bpm, strongest_periods};
+use self::repetition::{Repetition, RepetitionFinder};
 
 /// Audio needed before the first estimate.
 const MIN_SECONDS: f32 = 4.0;
@@ -33,6 +35,8 @@ const MIN_SEED_STRENGTH_RATIO: f32 = 0.6;
 const SAME_TEMPO_TOLERANCE: f32 = 0.03;
 /// The longest lag any feature reads, in beats of the slowest candidate.
 const MAX_LAG_BEATS: f32 = 4.0;
+/// The shortest repetition searched for, in beats of the fastest candidate: one bar.
+const MIN_REPETITION_BEATS: f32 = 4.0;
 /// Comb strength at or below the no-rhythm threshold gives `bpm: None`; at `FULL_PERIODICITY`
 /// and above, the periodicity factor of the confidence is 1. The threshold is `NOISE_STDS` noise
 /// standard deviations (noise autocorrelates with std ~1/sqrt(frames)), and at least `MIN_PERIODICITY`.
@@ -91,6 +95,7 @@ pub struct OctaveCandidate {
 /// Streaming tempo detector. Accumulates evidence over the last ~30 s pushed since the last reset.
 pub struct TempoDetector {
     onsets: OnsetEnvelopes,
+    repetition: RepetitionFinder,
 }
 
 /// The candidates for the current audio and how periodic it is.
@@ -103,8 +108,10 @@ struct Analysis {
 impl TempoDetector {
     /// Works at any sample rate; the extension uses 22,050 Hz.
     pub fn new(sample_rate: u32) -> Self {
+        let onsets = OnsetEnvelopes::new(sample_rate);
         Self {
-            onsets: OnsetEnvelopes::new(sample_rate),
+            repetition: RepetitionFinder::new(onsets.history_capacity()),
+            onsets,
         }
     }
 
@@ -142,11 +149,21 @@ impl TempoDetector {
             return None;
         }
 
-        let envelopes =
+        let envelopes: [Vec<f32>; Band::ALL.len()] =
             Band::ALL.map(|band| history.iter().map(|frame| frame[band.index()]).collect());
         let max_lag =
             (MAX_LAG_BEATS * bpm_to_lag(CANDIDATE_MIN_BPM, frame_rate)).ceil() as usize + 1;
-        let evidence = BeatEvidence::new(envelopes, frame_rate, max_lag)?;
+        let shortest_repetition =
+            (MIN_REPETITION_BEATS * bpm_to_lag(CANDIDATE_MAX_BPM, frame_rate)).floor() as usize;
+        let repetition = self
+            .repetition
+            .find(&envelopes[Band::Combined.index()], shortest_repetition);
+        let evidence = BeatEvidence::new(EvidenceInput {
+            envelopes,
+            frame_rate,
+            max_lag,
+            repetition,
+        })?;
 
         let search = LagRange {
             shortest: bpm_to_lag(SEARCH_MAX_BPM, frame_rate).floor() as usize,
@@ -154,13 +171,17 @@ impl TempoDetector {
         };
         let periods = strongest_periods(evidence.combined(), search, frame_rate);
         let strongest = *periods.first()?;
-        let candidates = candidate_tempi(&periods, frame_rate)
-            .into_iter()
-            .map(|bpm| OctaveCandidate {
-                bpm,
-                features: evidence.candidate_features(bpm).to_vec(),
-            })
-            .collect();
+        let candidates = candidate_tempi(CandidateSources {
+            periods: &periods,
+            repetition,
+            frame_rate,
+        })
+        .into_iter()
+        .map(|bpm| OctaveCandidate {
+            bpm,
+            features: evidence.candidate_features(bpm).to_vec(),
+        })
+        .collect();
 
         Some(Analysis {
             candidates,
@@ -172,10 +193,22 @@ impl TempoDetector {
     }
 }
 
-/// The octave relatives of the seed periods inside the candidate range, slowest first.
-/// `periods` is strongest first and non-empty.
-fn candidate_tempi(periods: &[Period], frame_rate: f32) -> Vec<f32> {
-    let mut tempi: Vec<f32> = Vec::new();
+struct CandidateSources<'a> {
+    /// Strongest first and non-empty.
+    periods: &'a [Period],
+    repetition: Option<Repetition>,
+    frame_rate: f32,
+}
+
+/// The tempi that fit a strong repetition, then the octave relatives of the seed periods, inside
+/// the candidate range, slowest first.
+fn candidate_tempi(sources: CandidateSources) -> Vec<f32> {
+    let CandidateSources {
+        periods,
+        repetition,
+        frame_rate,
+    } = sources;
+    let mut seed_tempi: Vec<f32> = Vec::new();
     let mut seeds = 0;
     for period in periods {
         let is_strong_enough = period.strength >= MIN_SEED_STRENGTH_RATIO * periods[0].strength;
@@ -183,19 +216,37 @@ fn candidate_tempi(periods: &[Period], frame_rate: f32) -> Vec<f32> {
             break;
         }
         let bpm = lag_to_bpm(period.lag, frame_rate);
-        if contains_tempo(&tempi, bpm) {
+        if contains_tempo(&seed_tempi, bpm) {
             continue;
         }
         seeds += 1;
-        for related in OCTAVE_RATIOS.map(|ratio| bpm * ratio) {
-            let is_in_range = (CANDIDATE_MIN_BPM..=CANDIDATE_MAX_BPM).contains(&related);
-            if is_in_range && !contains_tempo(&tempi, related) {
-                tempi.push(related);
-            }
+        seed_tempi.extend(OCTAVE_RATIOS.map(|ratio| bpm * ratio));
+    }
+
+    // Loop tempi go first so they win over a slightly-off seed relative of the same tempo.
+    let mut tempi =
+        repetition.map_or_else(Vec::new, |repetition| loop_tempi(repetition, frame_rate));
+    for related in seed_tempi {
+        let is_in_range = (CANDIDATE_MIN_BPM..=CANDIDATE_MAX_BPM).contains(&related);
+        if is_in_range && !contains_tempo(&tempi, related) {
+            tempi.push(related);
         }
     }
     tempi.sort_by(f32::total_cmp);
     tempi
+}
+
+/// Tempi with a power-of-two number of beats per repetition, when it's trusted as a loop length.
+fn loop_tempi(repetition: Repetition, frame_rate: f32) -> Vec<f32> {
+    if repetition.weight() <= 0.0 {
+        return Vec::new();
+    }
+    let one_beat_bpm = lag_to_bpm(repetition.lag, frame_rate);
+    (0..u32::BITS)
+        .map(|power| one_beat_bpm * 2f32.powi(power as i32))
+        .take_while(|&bpm| bpm <= CANDIDATE_MAX_BPM)
+        .filter(|&bpm| bpm >= CANDIDATE_MIN_BPM)
+        .collect()
 }
 
 fn contains_tempo(tempi: &[f32], bpm: f32) -> bool {

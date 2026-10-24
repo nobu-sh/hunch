@@ -88,6 +88,11 @@ impl OnsetEnvelopes {
         self.frame_rate
     }
 
+    /// The most frames `history` holds.
+    pub fn history_capacity(&self) -> usize {
+        self.history_capacity
+    }
+
     /// Oldest frame first.
     pub fn history(&self) -> &VecDeque<OnsetFrame> {
         &self.history

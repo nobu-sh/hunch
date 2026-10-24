@@ -2,6 +2,7 @@
 
 use super::onset::Band;
 use super::periodicity::{Autocorrelation, bpm_to_lag};
+use super::repetition::Repetition;
 
 /// Tempo the log-tempo features are measured from.
 const REFERENCE_BPM: f32 = 120.0;
@@ -35,8 +36,10 @@ pub const FEATURE_NAMES: [&str; FEATURE_COUNT] = [
     "hat_density_deviation",
     "grid_salience",
     "grid_offbeat_contrast",
+    "loop_beats_off_integer",
+    "loop_beats_off_power_of_two",
 ];
-pub const FEATURE_COUNT: usize = 18;
+pub const FEATURE_COUNT: usize = 20;
 
 /// Everything measured once per estimate that the per-candidate features read from.
 pub struct BeatEvidence {
@@ -48,15 +51,28 @@ pub struct BeatEvidence {
     frame_rate: f32,
     onsets_per_second: f32,
     hat_onsets_per_second: f32,
+    repetition: Option<Repetition>,
+}
+
+pub struct EvidenceInput {
+    /// Indexed by `Band::index`.
+    pub envelopes: [Vec<f32>; Band::ALL.len()],
+    pub frame_rate: f32,
+    /// The longest lag any feature reads, in frames.
+    pub max_lag: usize,
+    /// How often the whole pattern repeats, if it does.
+    pub repetition: Option<Repetition>,
 }
 
 impl BeatEvidence {
-    /// `envelopes` is indexed by `Band::index`. `None` when the combined envelope is flat (silence).
-    pub fn new(
-        envelopes: [Vec<f32>; Band::ALL.len()],
-        frame_rate: f32,
-        max_lag: usize,
-    ) -> Option<Self> {
+    /// `None` when the combined envelope is flat (silence).
+    pub fn new(input: EvidenceInput) -> Option<Self> {
+        let EvidenceInput {
+            envelopes,
+            frame_rate,
+            max_lag,
+            repetition,
+        } = input;
         let mut bands =
             Band::ALL.map(|band| Autocorrelation::new(&envelopes[band.index()], max_lag));
         let combined = bands[Band::Combined.index()].take()?;
@@ -72,6 +88,7 @@ impl BeatEvidence {
             frame_rate,
             onsets_per_second,
             hat_onsets_per_second,
+            repetition,
         })
     }
 
@@ -95,6 +112,9 @@ impl BeatEvidence {
         let log2_tempo = (bpm / REFERENCE_BPM).log2();
         let beats_per_second = bpm / 60.0;
         let grid = grid_alignment(&self.combined_envelope, beat);
+        let loop_fit = self
+            .repetition
+            .map_or(LoopFit::NEUTRAL, |repetition| loop_fit(repetition, beat));
 
         let features = [
             log2_tempo,
@@ -115,8 +135,35 @@ impl BeatEvidence {
             density_deviation(self.hat_onsets_per_second / beats_per_second),
             grid.salience,
             grid.offbeat_contrast,
+            loop_fit.off_integer,
+            loop_fit.off_power_of_two,
         ];
         features.map(|value| if value.is_finite() { value } else { 0.0 })
+    }
+}
+
+/// How badly a candidate's beat divides the repetition period, scaled by `Repetition::weight`.
+struct LoopFit {
+    /// Distance of the beats per repetition from a whole number, 0..=0.5.
+    off_integer: f32,
+    /// Distance of `log2(beats per repetition)` from a whole number, 0..=0.5.
+    off_power_of_two: f32,
+}
+
+impl LoopFit {
+    /// Without a repetition every candidate fits equally, so the features cancel in the softmax.
+    const NEUTRAL: Self = Self {
+        off_integer: 0.0,
+        off_power_of_two: 0.0,
+    };
+}
+
+fn loop_fit(repetition: Repetition, beat: f32) -> LoopFit {
+    let beats = repetition.lag / beat.max(EPSILON);
+    let off_whole = |value: f32| repetition.weight() * (value - value.round()).abs();
+    LoopFit {
+        off_integer: off_whole(beats),
+        off_power_of_two: off_whole(beats.max(EPSILON).log2()),
     }
 }
 
