@@ -25,6 +25,14 @@ const EDMA_MINOR: Profile = [
 /// Sha'ath (2011), KeyFinder's profiles tuned on popular and electronic music.
 const SHAATH_MAJOR: Profile = [6.6, 2.0, 3.5, 2.3, 4.6, 4.0, 2.5, 5.2, 2.4, 3.7, 2.3, 3.4];
 const SHAATH_MINOR: Profile = [6.5, 2.7, 3.5, 5.4, 2.6, 3.5, 2.5, 5.2, 4.0, 2.7, 4.3, 3.2];
+/// Fitted from EDMA on FSL10K loops and Beatport EDM Key 30 s windows (train splits, 70/30) by
+/// `hunch-eval key-sweep --fit-profile --profile-l2 0.3 --profile-fsl10k-share 0.7`.
+const LEARNED_MAJOR: Profile = [
+    1.000, 0.023, 0.314, 0.074, 0.689, 0.350, 0.050, 0.773, 0.000, 0.278, 0.120, 0.264,
+];
+const LEARNED_MINOR: Profile = [
+    1.000, 0.091, 0.280, 0.495, 0.137, 0.326, 0.051, 0.776, 0.215, 0.000, 0.422, 0.105,
+];
 
 /// Semitones up from a major tonic to its relative minor's tonic, and back.
 const RELATIVE_MINOR_OFFSET: u8 = 9;
@@ -38,21 +46,25 @@ pub enum KeyProfile {
     KrumhanslKessler,
     Temperley,
     /// Faraldo's electronic dance music profile.
-    #[default]
     Edma,
     /// Sha'ath's KeyFinder profile.
     Shaath,
+    /// EDMA refitted on loops and full electronic tracks.
+    #[default]
+    Learned,
 }
 
 impl KeyProfile {
-    pub const ALL: [KeyProfile; 4] = [
+    pub const ALL: [KeyProfile; 5] = [
         KeyProfile::KrumhanslKessler,
         KeyProfile::Temperley,
         KeyProfile::Edma,
         KeyProfile::Shaath,
+        KeyProfile::Learned,
     ];
 
-    fn template(self, mode: Mode) -> &'static Profile {
+    /// The profile's weights for `mode`, index 0 = tonic.
+    pub fn template(self, mode: Mode) -> &'static Profile {
         match (self, mode) {
             (KeyProfile::KrumhanslKessler, Mode::Major) => &KRUMHANSL_KESSLER_MAJOR,
             (KeyProfile::KrumhanslKessler, Mode::Minor) => &KRUMHANSL_KESSLER_MINOR,
@@ -62,6 +74,8 @@ impl KeyProfile {
             (KeyProfile::Edma, Mode::Minor) => &EDMA_MINOR,
             (KeyProfile::Shaath, Mode::Major) => &SHAATH_MAJOR,
             (KeyProfile::Shaath, Mode::Minor) => &SHAATH_MINOR,
+            (KeyProfile::Learned, Mode::Major) => &LEARNED_MAJOR,
+            (KeyProfile::Learned, Mode::Minor) => &LEARNED_MINOR,
         }
     }
 }

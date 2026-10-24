@@ -53,6 +53,9 @@ pub struct KeyEstimate {
     pub tonalness: f32,
     /// 0..=1, how clearly the best key beats keys with other notes. 0 when `key` is `None`.
     pub separation: f32,
+    /// Correlation of the chroma with the best key's profile, plus its tonic cue: how key-like the
+    /// pitch content is. 0 when `key` is `None`.
+    pub clarity: f32,
     /// 0..=1, grows with the amount of harmonic audio heard.
     pub evidence: f32,
 }
@@ -159,6 +162,7 @@ impl KeyDetector {
                 confidence: 0.0,
                 tonalness,
                 separation: 0.0,
+                clarity: 0.0,
                 evidence,
             };
         };
@@ -173,6 +177,7 @@ impl KeyDetector {
             confidence: evidence / (1.0 + (-logit).exp()),
             tonalness,
             separation,
+            clarity: ranking.best_score,
             evidence,
         }
     }
@@ -186,6 +191,11 @@ impl KeyDetector {
     /// All zeros before any pitch is heard.
     pub fn chroma(&self) -> [f32; PITCH_CLASSES] {
         self.chroma_at(self.tuning_cents())
+    }
+
+    /// Tuning-corrected pitch classes of the bass notes (the tonic cue), scaled like `chroma`.
+    pub fn bass_chroma(&self) -> [f32; PITCH_CLASSES] {
+        scaled_to_max(self.evidence.bass.fold(self.tuning_cents()))
     }
 
     fn chroma_at(&self, tuning: f32) -> [f32; PITCH_CLASSES] {
