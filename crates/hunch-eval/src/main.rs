@@ -3,6 +3,7 @@
 mod decode;
 mod fit;
 mod fsl10k;
+mod key_sweep;
 mod metrics;
 mod octave;
 mod report;
@@ -47,6 +48,8 @@ enum Command {
     OctaveFeatures(OctaveFeaturesArgs),
     /// Fit the tempo octave decision weights from octave-features CSVs.
     FitOctave(FitOctaveCliArgs),
+    /// Score a grid of KeyDetector configs on FSL10K keyed and atonal sounds.
+    KeySweep(key_sweep::KeySweepArgs),
 }
 
 #[derive(Args)]
@@ -170,6 +173,7 @@ fn main() -> ExitCode {
             rust_out: args.rust_out.as_deref(),
             l2: args.l2,
         }),
+        Command::KeySweep(args) => key_sweep::run(&args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
