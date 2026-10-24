@@ -3,6 +3,7 @@ import { defineBackground } from 'wxt/utils/define-background';
 import { badgeText } from '@/lib/badge';
 import {
   isBackgroundMessage,
+  isOverlayRequest,
   type BackgroundMessage,
   type OffscreenPingRequest,
   type PingReply,
@@ -12,8 +13,9 @@ import {
   ensureOffscreenDocument,
   sendOffscreenRequest,
 } from '@/lib/offscreen';
+import { injectOverlay, sendToOverlay } from '@/lib/overlay-injection';
 import { applySessionEvent, createTabState, withError, type TabState } from '@/lib/tab-state';
-import { clearTabState, updateTabState } from '@/lib/tab-store';
+import { clearTabState, getTabState, updateTabState } from '@/lib/tab-store';
 import { getEnabledTabs, removeTab, toggleTab } from '@/lib/tab-toggle';
 
 async function pingOffscreen(): Promise<void> {
@@ -34,7 +36,11 @@ async function closeOffscreenIfIdle(): Promise<void> {
 }
 
 async function publishTabState(state: TabState): Promise<void> {
-  await browser.action.setBadgeText({ tabId: state.tabId, text: badgeText(state) });
+  const { tabId } = state;
+  await Promise.all([
+    browser.action.setBadgeText({ tabId, text: badgeText(state) }),
+    sendToOverlay({ tabId, message: { target: 'overlay', type: 'state', state } }),
+  ]);
 }
 
 async function updateAndPublish(params: {
@@ -56,6 +62,7 @@ async function enableTab(params: { tabId: number; streamId: Promise<string> }): 
   const { tabId } = params;
   // Starts fresh, so a late event from a previous session can't leak into this one.
   await updateAndPublish({ tabId, update: () => createTabState(tabId) });
+  await injectOverlay(tabId);
   try {
     const streamId = await params.streamId;
     await ensureOffscreenDocument();
@@ -68,6 +75,7 @@ async function enableTab(params: { tabId: number; streamId: Promise<string> }): 
 
 /** Stops a tab's capture and forgets its state. The tab must already be off in `tab-toggle`. */
 async function teardownTab(tabId: number): Promise<void> {
+  await sendToOverlay({ tabId, message: { target: 'overlay', type: 'unmount' } });
   try {
     await sendOffscreenRequest({ target: 'offscreen', type: 'stop', tabId });
   } catch (error) {
@@ -88,6 +96,24 @@ async function handleActionClick(params: {
     return;
   }
   await teardownTab(params.tabId);
+}
+
+/** The overlay's close button: same as clicking the icon on an enabled tab. */
+async function handleOverlayClose(tabId: number): Promise<void> {
+  if (!(await isTabEnabled(tabId))) return;
+  await toggleTab(tabId);
+  await teardownTab(tabId);
+}
+
+async function getOverlayState(tabId: number): Promise<TabState | null> {
+  if (!(await isTabEnabled(tabId))) return null;
+  return getTabState(tabId);
+}
+
+/** A full page load drops the overlay with the old document, so put it back. */
+async function handleTabLoaded(tabId: number): Promise<void> {
+  if (!(await isTabEnabled(tabId))) return;
+  await injectOverlay(tabId);
 }
 
 async function handleTabRemoved(tabId: number): Promise<void> {
@@ -129,7 +155,26 @@ export default defineBackground(() => {
     });
   });
 
-  browser.runtime.onMessage.addListener((message) => {
+  browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.status !== 'complete') return;
+    handleTabLoaded(tabId).catch((error: unknown) => {
+      console.error(`Hunch failed to restore the overlay in tab ${String(tabId)}`, error);
+    });
+  });
+
+  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const senderTabId = sender.tab?.id;
+    if (isOverlayRequest(message) && senderTabId !== undefined) {
+      if (message.type === 'overlay-close') {
+        handleOverlayClose(senderTabId).catch((error: unknown) => {
+          console.error(`Hunch failed to turn off tab ${String(senderTabId)}`, error);
+        });
+        return;
+      }
+      void getOverlayState(senderTabId).then(sendResponse);
+      // Keeps the message channel open for the async sendResponse.
+      return true;
+    }
     if (!isBackgroundMessage(message)) return;
     handleBackgroundMessage(message).catch((error: unknown) => {
       console.error(
