@@ -1,9 +1,11 @@
 //! Tempo detection.
 //!
 //! Onset envelopes in kick, snare and hat bands are autocorrelated to find the strongest beat
-//! periods. Their tempo-octave relatives (×½, ×2, ×⅔, …) become candidates, and a linear model over
-//! beat-structure features picks the one producers would label the beat with. The model's weights
-//! live in `octave_weights.rs` and are fitted offline by `hunch-eval fit-octave`.
+//! periods. Their tempo-octave relatives (×½, ×2, ×⅔, …) become candidates, as do the tempi that
+//! fit a power-of-two number of beats into the loop when the audio repeats exactly. A linear model
+//! over beat-structure features picks the one producers would label the beat with, and a logistic
+//! map turns its probability into the confidence. The weights live in `octave_weights.rs` and are
+//! fitted offline by `hunch-eval fit-octave`.
 
 mod features;
 mod octave_weights;
@@ -43,8 +45,12 @@ const MIN_REPETITION_BEATS: f32 = 4.0;
 const NOISE_STDS: f32 = 3.0;
 const MIN_PERIODICITY: f32 = 0.06;
 const FULL_PERIODICITY: f32 = 0.4;
-/// The runner-up is offered as `alternate` when its probability is within this of the winner's.
+/// Keeps the probability logit finite.
+const MIN_PROBABILITY: f32 = 1e-4;
+/// The likeliest candidate at half or double the winner is offered as `alternate` when its
+/// probability is within this of the winner's.
 const ALTERNATE_MARGIN: f32 = 0.3;
+const ALTERNATE_RATIOS: [f32; 2] = [0.5, 2.0];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TempoEstimate {
@@ -52,7 +58,7 @@ pub struct TempoEstimate {
     pub bpm: Option<f32>,
     /// 0..=1, how likely `bpm` is right, including its tempo octave.
     pub confidence: f32,
-    /// The most likely other tempo octave (e.g. half or double `bpm`), when the octave call is unsure.
+    /// Half or double `bpm`, when the octave call is unsure.
     pub alternate: Option<f32>,
 }
 
@@ -80,9 +86,13 @@ impl TempoEstimate {
 ///   onsets and for hat-band onsets: how many octaves the density is from 8th notes.
 /// - `grid_salience`: mean combined envelope on the best-aligned pulse grid over its overall mean.
 /// - `grid_offbeat_contrast`: `(on − off) / (on + off)` for that grid vs the half-beat-shifted one.
+/// - `loop_beats_off_integer`, `loop_beats_off_power_of_two`: how far the beats per repetition of
+///   the whole pattern are from a whole number and from a power of two, times the trust in that
+///   repetition as a loop length. 0 for every candidate when the audio doesn't repeat.
 pub const OCTAVE_FEATURE_NAMES: &[&str] = &FEATURE_NAMES;
 
 const _: () = assert!(octave_weights::WEIGHTS.len() == FEATURE_COUNT);
+const _: () = assert!(octave_weights::CONFIDENCE_WEIGHTS.len() == CONFIDENCE_INPUT_NAMES.len());
 
 /// One tempo-octave candidate and the features the octave decision scores it with.
 /// Exposed so `hunch-eval` can dump features and fit the decision weights offline.
@@ -98,11 +108,15 @@ pub struct TempoDetector {
     repetition: RepetitionFinder,
 }
 
-/// The candidates for the current audio and how periodic it is.
-struct Analysis {
-    candidates: Vec<OctaveCandidate>,
-    /// 0..=1 factor from the strongest period's comb strength; 0 means no rhythm.
-    periodicity: f32,
+/// The candidates for the current audio and the evidence its confidence is computed from.
+/// Exposed so `hunch-eval` can fit the octave decision and the confidence mapping offline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OctaveAnalysis {
+    pub candidates: Vec<OctaveCandidate>,
+    /// 0..=1 from the strongest beat period's comb strength; 0 means no beat above noise.
+    pub periodicity: f32,
+    /// 0..=1 trust that the audio repeats exactly, like a seamless loop; 0 when it doesn't repeat.
+    pub loop_weight: f32,
 }
 
 impl TempoDetector {
@@ -121,10 +135,12 @@ impl TempoDetector {
     }
 
     pub fn estimate(&self) -> TempoEstimate {
-        let Some(analysis) = self.analyze() else {
+        let Some(analysis) = self.octave_analysis() else {
             return TempoEstimate::NONE;
         };
-        if analysis.periodicity <= 0.0 {
+        // An exact repetition is rhythm evidence even when no beat stands out, e.g. a sparse loop.
+        let has_rhythm = analysis.periodicity > 0.0 || analysis.loop_weight > 0.0;
+        if !has_rhythm {
             return TempoEstimate::NONE;
         }
         decide(&analysis)
@@ -133,7 +149,7 @@ impl TempoDetector {
     /// The candidates behind the current estimate, related by tempo octave.
     /// Empty until there's enough audio, or when it's silent.
     pub fn octave_candidates(&self) -> Vec<OctaveCandidate> {
-        self.analyze()
+        self.octave_analysis()
             .map(|analysis| analysis.candidates)
             .unwrap_or_default()
     }
@@ -142,7 +158,9 @@ impl TempoDetector {
         self.onsets.reset();
     }
 
-    fn analyze(&self) -> Option<Analysis> {
+    /// Everything the current estimate is decided from. `None` until there's enough audio, or when
+    /// it's silent.
+    pub fn octave_analysis(&self) -> Option<OctaveAnalysis> {
         let frame_rate = self.onsets.frame_rate();
         let history = self.onsets.history();
         if (history.len() as f32) < MIN_SECONDS * frame_rate {
@@ -183,12 +201,13 @@ impl TempoDetector {
         })
         .collect();
 
-        Some(Analysis {
+        Some(OctaveAnalysis {
             candidates,
             periodicity: periodicity_factor(PeriodicityInput {
                 strength: strongest.strength,
                 frame_count: history.len(),
             }),
+            loop_weight: repetition.map_or(0.0, |repetition| repetition.weight()),
         })
     }
 }
@@ -270,30 +289,76 @@ fn periodicity_factor(input: PeriodicityInput) -> f32 {
     ((input.strength - threshold) / (FULL_PERIODICITY - threshold)).clamp(0.0, 1.0)
 }
 
-/// Picks the highest-scoring candidate; offers the runner-up as alternate when it's close.
-fn decide(analysis: &Analysis) -> TempoEstimate {
+/// A candidate tempo and its softmax probability.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Ranked {
+    bpm: f32,
+    probability: f32,
+}
+
+/// Picks the highest-scoring candidate, with an octave alternate when it's close.
+fn decide(analysis: &OctaveAnalysis) -> TempoEstimate {
     let scores: Vec<f32> = analysis
         .candidates
         .iter()
         .map(|candidate| octave_score(&candidate.features))
         .collect();
-    let probabilities = softmax(&scores);
-
-    let mut ranked: Vec<usize> = (0..probabilities.len()).collect();
-    ranked.sort_by(|&a, &b| probabilities[b].total_cmp(&probabilities[a]));
+    let mut ranked: Vec<Ranked> = analysis
+        .candidates
+        .iter()
+        .zip(softmax(&scores))
+        .map(|(candidate, probability)| Ranked {
+            bpm: candidate.bpm,
+            probability,
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.probability.total_cmp(&a.probability));
     let Some(&winner) = ranked.first() else {
         return TempoEstimate::NONE;
     };
-    let alternate = ranked
-        .get(1)
-        .filter(|&&runner_up| probabilities[winner] - probabilities[runner_up] <= ALTERNATE_MARGIN)
-        .map(|&runner_up| analysis.candidates[runner_up].bpm);
 
     TempoEstimate {
-        bpm: Some(analysis.candidates[winner].bpm),
-        confidence: probabilities[winner] * analysis.periodicity,
-        alternate,
+        bpm: Some(winner.bpm),
+        confidence: calibrated_confidence(winner.probability),
+        alternate: octave_alternate(&ranked),
     }
+}
+
+/// The likeliest candidate at half or double the winner, if it's within `ALTERNATE_MARGIN`.
+/// `ranked` is most probable first.
+fn octave_alternate(ranked: &[Ranked]) -> Option<f32> {
+    let (winner, others) = ranked.split_first()?;
+    let is_octave_relative = |bpm: f32| {
+        ALTERNATE_RATIOS
+            .iter()
+            .any(|ratio| (bpm - ratio * winner.bpm).abs() <= SAME_TEMPO_TOLERANCE * bpm)
+    };
+    others
+        .iter()
+        .find(|other| is_octave_relative(other.bpm))
+        .filter(|other| winner.probability - other.probability <= ALTERNATE_MARGIN)
+        .map(|other| other.bpm)
+}
+
+/// Inputs of the confidence mapping, in the order of `octave_weights::CONFIDENCE_WEIGHTS`.
+/// Periodicity and loop strength were tried too and add nothing once the octave call is known.
+pub const CONFIDENCE_INPUT_NAMES: [&str; 1] = ["probability_logit"];
+
+/// The confidence mapping's inputs for a winner with softmax `probability`.
+pub fn confidence_inputs(probability: f32) -> [f32; CONFIDENCE_INPUT_NAMES.len()] {
+    let probability = probability.clamp(MIN_PROBABILITY, 1.0 - MIN_PROBABILITY);
+    [(probability / (1.0 - probability)).ln()]
+}
+
+/// Logistic (Platt) map from the winner's probability to the chance `bpm` is right, fitted on
+/// producer labels so the confidence reads as a probability.
+fn calibrated_confidence(probability: f32) -> f32 {
+    let score: f32 = confidence_inputs(probability)
+        .iter()
+        .zip(octave_weights::CONFIDENCE_WEIGHTS)
+        .map(|(value, weight)| value * weight)
+        .sum();
+    1.0 / (1.0 + (-(octave_weights::CONFIDENCE_BIAS + score)).exp())
 }
 
 /// `BIAS + Σ wᵢ·(fᵢ − meanᵢ)/stdᵢ` with the weights in `octave_weights.rs`.

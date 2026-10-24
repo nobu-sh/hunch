@@ -323,20 +323,23 @@ fn dump_octave_features(args: &OctaveFeaturesArgs) -> Result<(), String> {
     let min_seconds = args.dataset.min_seconds;
     let outcomes = run::par_map_sounds(&sounds, |sound| {
         let samples = run::prepare_audio(&sound.audio_path, min_seconds)?;
-        Ok(octave::candidates_for(&samples))
+        Ok(octave::analysis_for(&samples))
     });
     let mut entries = Vec::new();
     let mut failures = Vec::new();
     for (sound, outcome) in sounds.iter().copied().zip(outcomes) {
         match outcome {
-            Ok(candidates) => entries.push(SoundCandidates { sound, candidates }),
+            Ok(analysis) => entries.push(SoundCandidates { sound, analysis }),
             Err(error) => failures.push((sound, error)),
         }
     }
     let skipped = summarize_failures(&failures);
     octave::check_feature_lengths(&entries)?;
 
-    let without_candidates = entries.iter().filter(|e| e.candidates.is_empty()).count();
+    let without_candidates = entries
+        .iter()
+        .filter(|e| e.analysis.candidates.is_empty())
+        .count();
     let rows = octave::write_features_csv(&args.out, &entries)?;
     println!(
         "analyzed {} sounds, skipped {} {skipped:?}; {without_candidates} had no candidates",

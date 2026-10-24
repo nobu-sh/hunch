@@ -206,6 +206,29 @@ fn loop_tempi_lead_the_candidates() {
 }
 
 #[test]
+fn alternate_is_the_likeliest_octave_relative() {
+    let ranked = |pairs: &[(f32, f32)]| -> Vec<Ranked> {
+        pairs
+            .iter()
+            .map(|&(bpm, probability)| Ranked { bpm, probability })
+            .collect()
+    };
+    let close = ranked(&[(140.0, 0.4), (105.0, 0.3), (70.0, 0.2), (280.0, 0.1)]);
+    assert_eq!(octave_alternate(&close), Some(70.0));
+
+    let sure = ranked(&[(140.0, 0.8), (70.0, 0.1), (105.0, 0.1)]);
+    assert_eq!(octave_alternate(&sure), None);
+}
+
+#[test]
+fn confidence_rises_with_probability() {
+    let low = calibrated_confidence(0.3);
+    let high = calibrated_confidence(0.9);
+    assert!((0.0..=1.0).contains(&low) && (0.0..=1.0).contains(&high));
+    assert!(high > low, "{low} {high}");
+}
+
+#[test]
 fn feature_names_match_weights() {
     assert_eq!(
         OCTAVE_FEATURE_NAMES.len(),

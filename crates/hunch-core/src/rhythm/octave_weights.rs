@@ -4,7 +4,8 @@
 //! feature `OCTAVE_FEATURE_NAMES[i]`, one per line with the name in a trailing comment. A
 //! candidate scores `BIAS + Σ WEIGHTS[i] · (feature[i] − FEATURE_MEANS[i]) / FEATURE_STDS[i]`, and
 //! the softmax of the scores over a sound's candidates is the octave probability. Every std must be
-//! positive.
+//! positive. `CONFIDENCE_WEIGHTS` (one per `CONFIDENCE_INPUT_NAMES`) and `CONFIDENCE_BIAS` map the
+//! winner's evidence to the reported confidence through a logistic.
 
 pub const FEATURE_MEANS: [f32; 20] = [
     -0.070212655, // log2_tempo
@@ -76,3 +77,9 @@ pub const WEIGHTS: [f32; 20] = [
 ];
 
 pub const BIAS: f32 = 0.0;
+
+pub const CONFIDENCE_WEIGHTS: [f32; 1] = [
+    0.8645725, // probability_logit
+];
+
+pub const CONFIDENCE_BIAS: f32 = 0.35512567;
