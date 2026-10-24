@@ -28,6 +28,16 @@ const ID_COLUMN: usize = 0;
 const IS_CORRECT_COLUMN: usize = 5;
 const MAX_ITERATIONS: usize = 5_000;
 const GRADIENT_TOLERANCE: f64 = 1e-6;
+/// Top of the generated `octave_weights.rs`.
+const WEIGHTS_MODULE_HEADER: &str = "\
+//! Octave-decision weights, fitted by `hunch-eval fit-octave --rust-out`.
+//!
+//! Format: three `[f32; N]` arrays and one `f32`, all literals. Entry `i` of each array belongs to
+//! feature `OCTAVE_FEATURE_NAMES[i]`, one per line with the name in a trailing comment. A
+//! candidate scores `BIAS + Σ WEIGHTS[i] · (feature[i] − FEATURE_MEANS[i]) / FEATURE_STDS[i]`, and
+//! the softmax of the scores over a sound's candidates is the octave probability. Every std must be
+//! positive.
+";
 
 /// The candidates `TempoDetector` proposes for one sound.
 pub struct SoundCandidates<'a> {
@@ -165,6 +175,8 @@ pub struct FitOctaveArgs<'a> {
     pub train: &'a Path,
     pub val: &'a Path,
     pub out: &'a Path,
+    /// Where to write the weights as `rhythm/octave_weights.rs`; printed when `None`.
+    pub rust_out: Option<&'a Path>,
     pub l2: f64,
 }
 
@@ -256,7 +268,15 @@ pub fn fit_octave(args: &FitOctaveArgs) -> Result<(), String> {
     serde_json::to_writer_pretty(BufWriter::new(file), &weights_file)
         .map_err(|error| format!("cannot write {}: {error}", args.out.display()))?;
     println!("wrote {}", args.out.display());
-    println!("\n{}", rust_snippet(&train.feature_names, model));
+    let module = weights_module(&train.feature_names, model);
+    match args.rust_out {
+        Some(path) => {
+            std::fs::write(path, module)
+                .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+            println!("wrote {}", path.display());
+        }
+        None => println!("\n{module}"),
+    }
     Ok(())
 }
 
@@ -283,24 +303,23 @@ fn print_weights(names: &[String], model: &OctaveModel) {
     }
 }
 
-/// Constants to paste next to `OCTAVE_FEATURE_NAMES` in `hunch-core`.
-fn rust_snippet(names: &[String], model: &OctaveModel) -> String {
-    let list = |values: &[f64]| {
-        values
+/// The fitted model as the contents of `hunch-core`'s `rhythm/octave_weights.rs`.
+fn weights_module(names: &[String], model: &OctaveModel) -> String {
+    let array = |name: &str, values: &[f64]| {
+        let literals: Vec<String> = values.iter().map(|v| format!("{:?},", *v as f32)).collect();
+        let width = literals.iter().map(String::len).max().unwrap_or(0);
+        let lines: String = literals
             .iter()
-            .map(|v| format!("{:?}", *v as f32))
-            .collect::<Vec<_>>()
-            .join(", ")
+            .zip(names)
+            .map(|(literal, feature)| format!("    {literal:<width$} // {feature}\n"))
+            .collect();
+        format!("pub const {name}: [f32; {}] = [\n{lines}];\n", values.len())
     };
     format!(
-        "// Fitted by `hunch-eval fit-octave` over features [{}].\n\
-         pub const OCTAVE_FEATURE_MEAN: &[f32] = &[{}];\n\
-         pub const OCTAVE_FEATURE_STD: &[f32] = &[{}];\n\
-         pub const OCTAVE_WEIGHTS: &[f32] = &[{}];",
-        names.join(", "),
-        list(&model.mean),
-        list(&model.std),
-        list(&model.weights)
+        "{WEIGHTS_MODULE_HEADER}\n{}\n{}\n{}\npub const BIAS: f32 = 0.0;\n",
+        array("FEATURE_MEANS", &model.mean),
+        array("FEATURE_STDS", &model.std),
+        array("WEIGHTS", &model.weights)
     )
 }
 

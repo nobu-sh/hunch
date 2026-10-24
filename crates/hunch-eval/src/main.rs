@@ -146,6 +146,10 @@ struct FitOctaveCliArgs {
     #[arg(long)]
     out: PathBuf,
 
+    /// Also write the weights as hunch-core's `rhythm/octave_weights.rs` here.
+    #[arg(long)]
+    rust_out: Option<PathBuf>,
+
     /// L2 regularization strength.
     #[arg(long, default_value_t = DEFAULT_L2)]
     l2: f64,
@@ -163,6 +167,7 @@ fn main() -> ExitCode {
             train: &args.train,
             val: &args.val,
             out: &args.out,
+            rust_out: args.rust_out.as_deref(),
             l2: args.l2,
         }),
     };
