@@ -346,6 +346,7 @@ mod tests {
             bpm,
             bpm_confidence: 0.0,
             bpm_alternate: None,
+            tuning_cents: None,
             seconds_analyzed: seconds,
         }
     }
