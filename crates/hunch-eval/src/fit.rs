@@ -14,6 +14,10 @@ const MAX_STEP: f64 = 1e3;
 /// Armijo sufficient-decrease constant for the backtracking line search.
 const ARMIJO: f64 = 0.5;
 const MAX_HALVINGS: usize = 60;
+const NEWTON_ITERATIONS: usize = 50;
+/// Stop Newton's method once a step is shorter than this.
+const NEWTON_TOLERANCE: f64 = 1e-10;
+const MIN_PIVOT: f64 = 1e-12;
 
 /// One sound's octave candidates.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,6 +63,12 @@ impl OctaveModel {
             .zip(&self.weights)
             .map(|(((x, mean), std), weight)| (x - mean) / std * weight)
             .sum()
+    }
+
+    /// Softmax of the candidates' scores.
+    pub fn probabilities(&self, set: &CandidateSet) -> Vec<f64> {
+        let scores: Vec<f64> = set.features.iter().map(|x| self.score(x)).collect();
+        softmax(&scores, |_| true).probabilities
     }
 
     /// Index of the highest-scoring candidate, the first on ties.
@@ -269,6 +279,111 @@ fn line_search(
     None
 }
 
+/// One sound's confidence inputs and whether its estimate was right.
+pub struct CalibrationSample {
+    pub inputs: Vec<f64>,
+    pub is_correct: bool,
+}
+
+/// Logistic map from confidence inputs to the probability the estimate is right.
+#[derive(Debug, Clone, Serialize)]
+pub struct Calibration {
+    pub weights: Vec<f64>,
+    pub bias: f64,
+}
+
+impl Calibration {
+    pub fn probability(&self, inputs: &[f64]) -> f64 {
+        sigmoid(self.bias + dot(&self.weights, inputs))
+    }
+}
+
+/// Fits `Calibration` by Newton's method on the mean log-loss plus `l2 / 2 · |weights|²`.
+pub fn fit_calibration(samples: &[CalibrationSample], l2: f64) -> Result<Calibration, String> {
+    let Some(first) = samples.first() else {
+        return Err("no sounds to calibrate on".to_string());
+    };
+    let dimensions = first.inputs.len() + 1;
+    if let Some(bad) = samples.iter().find(|s| s.inputs.len() + 1 != dimensions) {
+        return Err(format!(
+            "calibration inputs differ in length: {} and {}",
+            dimensions - 1,
+            bad.inputs.len()
+        ));
+    }
+    // Parameter 0 is the bias, which is not regularized.
+    let with_bias = |sample: &CalibrationSample| -> Vec<f64> {
+        std::iter::once(1.0)
+            .chain(sample.inputs.iter().copied())
+            .collect()
+    };
+    let rows: Vec<Vec<f64>> = samples.iter().map(with_bias).collect();
+    let count = samples.len() as f64;
+    let mut parameters = vec![0.0; dimensions];
+    for _ in 0..NEWTON_ITERATIONS {
+        let mut gradient = vec![0.0; dimensions];
+        let mut hessian = vec![vec![0.0; dimensions]; dimensions];
+        for (row, sample) in rows.iter().zip(samples) {
+            let probability = sigmoid(dot(row, &parameters));
+            let residual = probability - f64::from(u8::from(sample.is_correct));
+            let curvature = probability * (1.0 - probability);
+            for i in 0..dimensions {
+                gradient[i] += residual * row[i] / count;
+                for j in 0..dimensions {
+                    hessian[i][j] += curvature * row[i] * row[j] / count;
+                }
+            }
+        }
+        for i in 1..dimensions {
+            gradient[i] += l2 * parameters[i];
+            hessian[i][i] += l2;
+        }
+        let step = solve(hessian, gradient)
+            .ok_or("calibration inputs are degenerate: the Newton system is singular")?;
+        for (parameter, delta) in parameters.iter_mut().zip(&step) {
+            *parameter -= delta;
+        }
+        if norm(&step) < NEWTON_TOLERANCE {
+            break;
+        }
+    }
+    Ok(Calibration {
+        bias: parameters[0],
+        weights: parameters[1..].to_vec(),
+    })
+}
+
+fn sigmoid(x: f64) -> f64 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+/// Solves `matrix · x = rhs` by Gaussian elimination with partial pivoting; `None` if singular.
+fn solve(mut matrix: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> Option<Vec<f64>> {
+    let size = rhs.len();
+    for column in 0..size {
+        let pivot = (column..size)
+            .max_by(|&a, &b| matrix[a][column].abs().total_cmp(&matrix[b][column].abs()))?;
+        if matrix[pivot][column].abs() < MIN_PIVOT {
+            return None;
+        }
+        matrix.swap(column, pivot);
+        rhs.swap(column, pivot);
+        for row in column + 1..size {
+            let factor = matrix[row][column] / matrix[column][column];
+            for k in column..size {
+                matrix[row][k] -= factor * matrix[column][k];
+            }
+            rhs[row] -= factor * rhs[column];
+        }
+    }
+    let mut solution = vec![0.0; size];
+    for row in (0..size).rev() {
+        let known: f64 = (row + 1..size).map(|k| matrix[row][k] * solution[k]).sum();
+        solution[row] = (rhs[row] - known) / matrix[row][row];
+    }
+    Some(solution)
+}
+
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
@@ -408,6 +523,39 @@ mod tests {
         }];
         let error = fit(&sets, 1, &options()).err().expect("error");
         assert!(error.contains("sound 7"), "{error}");
+    }
+
+    #[test]
+    fn calibration_recovers_logistic_rule() {
+        let mut rng = Rng(7);
+        let samples: Vec<CalibrationSample> = (0..4_000)
+            .map(|_| {
+                let x = rng.uniform() * 6.0 - 3.0;
+                let probability = sigmoid(1.5 * x - 0.5);
+                CalibrationSample {
+                    inputs: vec![x],
+                    is_correct: rng.uniform() < probability,
+                }
+            })
+            .collect();
+        let calibration = fit_calibration(&samples, 0.0).expect("fit");
+        assert!(
+            (calibration.weights[0] - 1.5).abs() < 0.2,
+            "{calibration:?}"
+        );
+        assert!((calibration.bias + 0.5).abs() < 0.2, "{calibration:?}");
+    }
+
+    #[test]
+    fn calibration_rejects_constant_inputs_without_l2() {
+        let samples: Vec<CalibrationSample> = [true, false]
+            .map(|is_correct| CalibrationSample {
+                inputs: vec![1.0],
+                is_correct,
+            })
+            .into();
+        assert!(fit_calibration(&samples, 0.0).is_err());
+        assert!(fit_calibration(&samples, 1e-2).is_ok());
     }
 
     #[test]
