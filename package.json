@@ -11,6 +11,7 @@
     "browser": "hunch-browser",
     "browser:extension": "hunch-browser --mixin extension/dev/browser.ts",
     "browser:check": "hunch-browser --mixin extension/dev/browser-check.ts",
+    "browser:desktop": "hunch-browser --mixin apps/desktop/dev/browser.ts",
     "desktop:dev": "pnpm --filter hunch-desktop tauri:dev",
     "desktop:build": "pnpm --filter hunch-desktop tauri:build"
   },
