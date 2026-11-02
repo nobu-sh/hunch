@@ -43,7 +43,7 @@ pnpm browser:desktop  # with desktop:dev running: attach to the app's page and p
 - Tauri is pinned to 2.11 (crate and npm) because 2.12 needs rustc 1.90.
 - The installer is an unsigned, per-user NSIS setup (`Hunch_<version>_x64-setup.exe`, no admin prompt). It installs silently with `/S /D=<dir>`, and `uninstall.exe /S` removes it.
 - `.github/workflows/desktop-release.yml` builds the installer on `windows-latest` and uploads it as the `hunch-windows-installer` artifact. It runs on manual dispatch, `desktop-v*` tags, and pull requests that change the workflow.
-- The icon source is `apps/desktop/icons-src/icon.svg`. To change it, render a 1024 px PNG and run `pnpm --filter hunch-desktop tauri icon <png>`, then delete the outputs Windows doesn't use (`android/`, `ios/`, `icon.icns`, `Square*`, `StoreLogo.png`, `64x64.png`).
+- The icon source is `apps/desktop/icons-src/icon.svg`. To change it, render a 1024 px PNG and run `pnpm --filter hunch-desktop tauri icon <png>`, then delete the outputs Windows doesn't use (`android/`, `ios/`, `icon.icns`, `Square*`, `StoreLogo.png`, `64x64.png`). The extension's `extension/public/icon/{16,32,48,128}.png` are rendered from the same SVG at those sizes.
 
 ## Running the extension in a browser
 
