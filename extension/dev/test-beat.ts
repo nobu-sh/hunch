@@ -1,5 +1,14 @@
 // A local page that synthesizes a known beat with Web Audio, so Hunch has something to hear.
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import type { Page } from 'puppeteer-core';
+
+const LOCAL_HOST = '127.0.0.1';
+
+export interface TestBeatServer {
+  url: string;
+  close: () => Promise<void>;
+}
 
 export const TEST_BEAT = {
   bpm: 120,
@@ -121,15 +130,29 @@ context.startRendering().then((rendered) => {
 `;
 
 /** Serves the test page on a free localhost port. Overlays only inject into http(s) pages. */
-export async function startTestPage() {
+export async function startTestBeat(): Promise<TestBeatServer> {
   const server = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     response.end(PAGE);
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address();
+  await new Promise<void>((resolve) => {
+    server.listen(0, LOCAL_HOST, resolve);
+  });
+  // Serving alone shouldn't keep node running once the browser has closed.
+  server.unref();
+  const { port } = server.address() as AddressInfo;
   return {
-    url: `http://127.0.0.1:${String(port)}/`,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    url: `http://${LOCAL_HOST}:${String(port)}/`,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      }),
   };
+}
+
+/** Resolves once the test page's beat is playing. */
+export async function waitForTestBeat(page: Page): Promise<void> {
+  await page.waitForFunction(() => document.querySelector('audio')?.paused === false);
 }

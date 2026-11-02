@@ -1,19 +1,19 @@
 {
-  "name": "@hunch/harness",
+  "name": "@hunch/browser",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.mjs",
-    "./extension": "./src/extension/index.mjs"
+    ".": "./src/index.ts"
   },
   "bin": {
-    "hunch-harness": "./src/cli.mjs"
+    "hunch-browser": "./src/cli.ts"
   },
   "scripts": {
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
@@ -22,9 +22,12 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/node": "^26.0.0",
     "eslint": "^10.13.0",
     "globals": "^17.13.0",
     "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.0",
     "vitest": "^4.1.12"
   }
 }
