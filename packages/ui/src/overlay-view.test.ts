@@ -73,6 +73,17 @@ describe('overlayView status', () => {
     expect(view.bpm?.label).toBe('142');
   });
 
+  it('is stopped with empty readouts once the source stopped', () => {
+    const history = [{ windowId: 1, endedAt: 0, durationSeconds: 30, estimate: estimate() }];
+    const state: SessionState = { ...createSessionState(TAB_ID), history, isStopped: true };
+
+    const view = overlayView(state);
+
+    expect(view).toMatchObject({ status: 'stopped', statusTone: 'idle', key: null, bpm: null });
+    expect(view.pill).toBe('— · —');
+    expect(view.history).toHaveLength(1);
+  });
+
   it('shows the error over everything else', () => {
     const state = { ...withWindow({ estimates: [estimate()] }), error: 'capture refused' };
 

@@ -4,8 +4,10 @@ import {
   HISTORY_LIMIT,
   RECENT_ESTIMATES_LIMIT,
   applySessionEvent,
+  applySourceStatus,
   createSessionState,
   latestEstimate,
+  withFreshSession,
   type SessionState,
 } from './session-state';
 
@@ -127,5 +129,54 @@ describe('applySessionEvent', () => {
     expect(state.window?.windowId).toBe(2);
     expect(state.window?.hasEnded).toBe(false);
     expect(state.history).toHaveLength(1);
+  });
+});
+
+describe('applySourceStatus', () => {
+  const finished = apply(createSessionState(TAB_ID), started(1), ended(1));
+
+  it('stops on ended, clearing the window but keeping its history', () => {
+    const state = applySourceStatus({ state: finished, sourceState: 'ended' });
+
+    expect(state.isStopped).toBe(true);
+    expect(state.window).toBeNull();
+    expect(state.history).toEqual(finished.history);
+  });
+
+  it('stops on failed', () => {
+    expect(applySourceStatus({ state: finished, sourceState: 'failed' }).isStopped).toBe(true);
+  });
+
+  it('resumes on listening', () => {
+    const stopped = applySourceStatus({ state: finished, sourceState: 'ended' });
+
+    expect(applySourceStatus({ state: stopped, sourceState: 'listening' }).isStopped).toBe(false);
+  });
+
+  it('leaves a session alone while its source is only silent', () => {
+    expect(applySourceStatus({ state: finished, sourceState: 'silent' })).toBe(finished);
+  });
+
+  it('records a window that ends after the stop', () => {
+    const open = apply(createSessionState(TAB_ID), started(1));
+    const stopped = applySourceStatus({ state: open, sourceState: 'ended' });
+
+    const state = apply(stopped, ended(1));
+
+    expect(state.window).toBeNull();
+    expect(state.history).toHaveLength(1);
+  });
+});
+
+describe('withFreshSession', () => {
+  it('clears the window, error and stop but keeps the history', () => {
+    const stopped = applySourceStatus({
+      state: { ...apply(createSessionState(TAB_ID), started(1), ended(1)), error: 'oops' },
+      sourceState: 'ended',
+    });
+
+    const state = withFreshSession(stopped);
+
+    expect(state).toEqual({ ...createSessionState(TAB_ID), history: stopped.history });
   });
 });

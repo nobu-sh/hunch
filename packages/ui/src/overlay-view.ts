@@ -8,6 +8,9 @@ export const TUNING_DISPLAY_CENTS = 15;
 /** Shown in place of a value that isn't known yet. */
 export const EMPTY_VALUE = '—';
 
+/** Shown once the session's source has stopped. */
+export const STOPPED_STATUS = 'stopped';
+
 export type StatusTone = 'idle' | 'active' | 'locked' | 'error';
 
 export interface KeyView {
@@ -125,6 +128,7 @@ function statusLine(params: {
 } {
   const { state, estimate, isLocked } = params;
   if (state.error !== null) return { status: state.error, statusTone: 'error' };
+  if (state.isStopped) return { status: STOPPED_STATUS, statusTone: 'idle' };
   if (state.window === null) return { status: 'listening…', statusTone: 'idle' };
   if (state.window.hasEnded) return { status: 'silence', statusTone: 'idle' };
   if (isLocked) return { status: 'locked', statusTone: 'locked' };
