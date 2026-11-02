@@ -1,6 +1,8 @@
 //! Streaming key and BPM analysis. Pure DSP: no IO, no browser dependencies.
 
 mod analyzer;
+#[cfg(feature = "serde")]
+pub mod contract;
 pub mod dsp;
 mod key;
 pub mod rhythm;

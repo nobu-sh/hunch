@@ -1,5 +1,6 @@
 //! JS bindings for `hunch-core`. The exported shape is a contract with `extension/`.
 
+use hunch_core::contract::{EstimateDto, SessionEventDto};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -28,87 +29,6 @@ extern "C" {
 
     #[wasm_bindgen(typescript_type = "SessionEvent[]")]
     pub type JsSessionEvents;
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct EstimateDto {
-    key: Option<String>,
-    key_confidence: f32,
-    bpm: Option<f32>,
-    bpm_confidence: f32,
-    bpm_alternate: Option<f32>,
-    tuning_cents: Option<f32>,
-    seconds_analyzed: f32,
-}
-
-impl From<hunch_core::Estimate> for EstimateDto {
-    fn from(estimate: hunch_core::Estimate) -> Self {
-        Self {
-            key: estimate.key.map(|key| key.to_string()),
-            key_confidence: estimate.key_confidence,
-            bpm: estimate.bpm,
-            bpm_confidence: estimate.bpm_confidence,
-            bpm_alternate: estimate.bpm_alternate,
-            tuning_cents: estimate.tuning_cents,
-            seconds_analyzed: estimate.seconds_analyzed,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-enum SessionEventDto {
-    WindowStarted {
-        window_id: u32,
-        at_seconds: f32,
-    },
-    Estimate {
-        window_id: u32,
-        estimate: EstimateDto,
-    },
-    WindowEnded {
-        window_id: u32,
-        estimate: Option<EstimateDto>,
-        duration_seconds: f32,
-        too_short: bool,
-    },
-}
-
-impl From<hunch_core::SessionEvent> for SessionEventDto {
-    fn from(event: hunch_core::SessionEvent) -> Self {
-        match event {
-            hunch_core::SessionEvent::WindowStarted {
-                window_id,
-                at_seconds,
-            } => Self::WindowStarted {
-                window_id,
-                at_seconds,
-            },
-            hunch_core::SessionEvent::Estimate {
-                window_id,
-                estimate,
-            } => Self::Estimate {
-                window_id,
-                estimate: estimate.into(),
-            },
-            hunch_core::SessionEvent::WindowEnded {
-                window_id,
-                estimate,
-                duration_seconds,
-                too_short,
-            } => Self::WindowEnded {
-                window_id,
-                estimate: estimate.map(EstimateDto::from),
-                duration_seconds,
-                too_short,
-            },
-        }
-    }
 }
 
 /// serde-wasm-bindgen turns `None` into `undefined` by default; the contract says `null`.

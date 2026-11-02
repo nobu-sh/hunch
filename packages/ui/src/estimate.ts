@@ -1,4 +1,4 @@
-/** Mirrors the `Estimate` object returned by `Analyzer.push` and `Session.push` in crates/hunch-wasm. */
+/** Mirrors `EstimateDto` in crates/hunch-core/src/contract.rs, sent by the WASM bindings and the desktop app. */
 export interface Estimate {
   key: string | null;
   keyConfidence: number;
@@ -10,7 +10,7 @@ export interface Estimate {
   secondsAnalyzed: number;
 }
 
-/** Mirrors `SessionEvent` from crates/hunch-wasm. Timings are seconds of audio, not wall clock. */
+/** Mirrors `SessionEventDto` in crates/hunch-core/src/contract.rs. Timings are seconds of audio, not wall clock. */
 export type SessionEvent =
   | { type: 'windowStarted'; windowId: number; atSeconds: number }
   | { type: 'estimate'; windowId: number; estimate: Estimate }

@@ -10,8 +10,8 @@ rust-version.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-hunch-core.workspace = true
-serde = { version = "1", features = ["derive"] }
+hunch-core = { workspace = true, features = ["serde"] }
+serde = "1"
 serde-wasm-bindgen = "0.6"
 # Pinned: newer wasm-bindgen-cli releases need rustc > 1.86 to install with --locked.
 wasm-bindgen = "=0.2.108"
