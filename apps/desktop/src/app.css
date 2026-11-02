@@ -1,0 +1,10 @@
+/* The window is transparent and sized to the overlay, so only the panel or pill shows. */
+html,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+#app {
+  display: inline-block;
+}

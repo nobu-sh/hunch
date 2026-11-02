@@ -18,6 +18,8 @@ Options:
   --connect <target>       Attach to a running browser instead: a debugging port, an http(s)
                            DevTools URL or a ws(s) endpoint. Installing extensions into it
                            needs --enable-unsafe-extension-debugging.
+  --reuse-page             With --connect, drive the first open page instead of a new tab,
+                           e.g. an app's webview.
   --extension <dir>        Unpacked extension to load. Repeatable.
   --seconds <n>            Close after n seconds.
   --window-size <w>x<h>    Window size, e.g. 1280x800. The page size when headless.

@@ -1,0 +1,9 @@
+name: Tauri Linux dependencies
+description: System packages that apps/desktop/src-tauri needs to build on Linux.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev

@@ -8,5 +8,9 @@ node_modules/
 /extension/.wxt/
 /extension/src/wasm/pkg/
 
+# Desktop app
+/apps/desktop/dist/
+/apps/desktop/src-tauri/gen/
+
 # Local data (datasets, personal beat set)
 /data/

@@ -1,4 +1,5 @@
 // One browser run: launch or attach, load extensions, open the URL, run the mixin, wait.
+import type { Browser, Page } from 'puppeteer-core';
 import { watchConsole } from './console.ts';
 import { removeEndpoint, writeEndpoint } from './endpoint.ts';
 import { type LoadedExtension, loadExtension } from './extensions.ts';
@@ -41,10 +42,11 @@ export async function runBrowser(params: {
       log(`Extension ${extension.id}: ${path}`);
       extensions.push(extension);
     }
-    // An attached browser may be someone's own window, so leave its tabs alone.
-    const page = opened.isConnected
-      ? await browser.newPage()
-      : ((await browser.pages())[0] ?? (await browser.newPage()));
+    const page = await pickPage({
+      browser,
+      isConnected: opened.isConnected,
+      reusePage: options.reusePage,
+    });
     const consoleWatch = watchConsole({
       browser,
       page,
@@ -82,6 +84,22 @@ export async function runBrowser(params: {
     if (hasEndpointFile) await removeEndpoint(options.endpointFile);
     await opened.close();
   }
+}
+
+/** An attached browser may be someone's own window, so its pages are left alone unless asked. */
+async function pickPage(params: {
+  browser: Browser;
+  isConnected: boolean;
+  reusePage: boolean;
+}): Promise<Page> {
+  const { browser, isConnected, reusePage } = params;
+  const isNewTab = isConnected && !reusePage;
+  if (isNewTab) return browser.newPage();
+
+  const [firstPage] = await browser.pages();
+  if (firstPage) return firstPage;
+  if (isConnected) throw new Error('--reuse-page found no open page in the attached browser');
+  return browser.newPage();
 }
 
 function aborted(signal: AbortSignal): Promise<void> {

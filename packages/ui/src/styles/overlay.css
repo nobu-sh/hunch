@@ -1,10 +1,15 @@
 /*
- * Overlay stylesheet, self-contained so no page style can reach in. Theme tokens sit on :host,
- * so inject it into the shadow root that holds the overlay: in a Vite app,
+ * Overlay stylesheet, self-contained so no page style can reach in. On a page you don't own,
+ * inject it into the shadow root that holds the overlay: in a Vite app,
  * `import overlayCss from '@hunch/ui/overlay.css?inline'` and put it in a <style> there.
+ * A page that is only the overlay, like the desktop app, can import it as a normal stylesheet.
  */
 :host {
   all: initial;
+}
+/* :root carries the tokens when there is no shadow root. */
+:host,
+:root {
   --bg: rgba(18, 18, 22, 0.88);
   --border: rgba(255, 255, 255, 0.12);
   --text: #f4f4f6;
