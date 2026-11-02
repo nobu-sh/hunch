@@ -116,6 +116,21 @@ impl Segmenter {
         self.position - self.frame_filled as u64
     }
 
+    /// Where the open window would end if the stream stopped now: where a quiet run that hasn't
+    /// closed it yet began, else the end of what's been pushed. `None` while no window is open.
+    pub fn open_window_end(&self) -> Option<u64> {
+        if !self.is_open {
+            return None;
+        }
+        // While open, a run counts quiet frames.
+        let is_quiet_run = self.run_frames > 0;
+        Some(if is_quiet_run {
+            self.run_start
+        } else {
+            self.position
+        })
+    }
+
     pub fn reset(&mut self) {
         self.frame_energy = 0.0;
         self.frame_filled = 0;

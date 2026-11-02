@@ -255,3 +255,62 @@ fn reset_drops_the_open_window_and_keeps_counting() {
     assert_eq!(windows[0].id, 2);
     assert_near(windows[0].at_seconds, 3.0, "start");
 }
+
+#[test]
+fn finish_ends_the_open_window_with_its_final_estimate() {
+    let mut session = Session::new(SAMPLE_RATE);
+    let mut events = session.push(&[silence(1.0), tone(5.0)].concat());
+    events.extend(session.finish());
+
+    let windows = ended_windows(&events);
+    assert_eq!(windows.len(), 1);
+    assert_near(windows[0].at_seconds, 1.0, "start");
+    assert_near(end_seconds(&windows[0]), 6.0, "end");
+    assert!(!windows[0].too_short);
+    assert_analyzed_whole_window(&windows[0]);
+}
+
+#[test]
+fn finish_marks_a_short_window_too_short() {
+    let mut session = Session::new(SAMPLE_RATE);
+    let mut events = session.push(&tone(2.0));
+    events.extend(session.finish());
+
+    let windows = ended_windows(&events);
+    assert_eq!(windows.len(), 1);
+    assert!(windows[0].too_short);
+}
+
+#[test]
+fn finish_leaves_out_a_trailing_quiet_stretch() {
+    let mut session = Session::new(SAMPLE_RATE);
+    let mut events = session.push(&[tone(5.0), silence(1.0)].concat());
+    assert!(ended_windows(&events).is_empty(), "1 s of silence ended it");
+    events.extend(session.finish());
+
+    let windows = ended_windows(&events);
+    assert_eq!(windows.len(), 1);
+    assert_near(end_seconds(&windows[0]), 5.0, "end");
+    assert_analyzed_whole_window(&windows[0]);
+}
+
+#[test]
+fn finish_without_an_open_window_ends_nothing() {
+    let mut session = Session::new(SAMPLE_RATE);
+    session.push(&[tone(5.0), silence(2.0)].concat());
+
+    assert!(session.finish().is_empty());
+}
+
+#[test]
+fn a_finished_session_keeps_counting() {
+    let mut session = Session::new(SAMPLE_RATE);
+    session.push(&tone(5.0));
+    session.finish();
+    let events = session.push(&[silence(1.0), tone(5.0), silence(2.0)].concat());
+
+    let windows = ended_windows(&events);
+    assert_eq!(windows.len(), 1);
+    assert_eq!(windows[0].id, 2);
+    assert_near(windows[0].at_seconds, 6.0, "start");
+}
