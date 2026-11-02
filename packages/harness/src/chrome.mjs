@@ -1,5 +1,6 @@
-// Chrome for Testing, kept in extension/.chrome. Branded Chrome ignores unpacked extensions
-// passed on the command line, so the harness always uses this build.
+// Chrome for Testing, kept in the repo root's .chrome so every package shares one download.
+// Branded Chrome ignores unpacked extensions passed on the command line, so the harness always
+// uses this build.
 import {
   Browser,
   detectBrowserPlatform,
@@ -9,7 +10,7 @@ import {
 } from '@puppeteer/browsers';
 import { fileURLToPath } from 'node:url';
 
-export const CHROME_CACHE_DIR = fileURLToPath(new URL('../../.chrome', import.meta.url));
+export const CHROME_CACHE_DIR = fileURLToPath(new URL('../../../.chrome', import.meta.url));
 const CHANNEL = 'stable';
 
 export async function installChrome() {
@@ -37,8 +38,4 @@ export async function chromeExecutable() {
     throw new Error('Chrome for Testing is not installed. Run: pnpm browser:install');
   }
   return newest.executablePath;
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  await installChrome();
 }

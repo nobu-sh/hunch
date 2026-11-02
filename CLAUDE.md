@@ -8,6 +8,8 @@ Detects the key and BPM of audio as it plays. A Rust analysis core runs natively
 - `crates/hunch-wasm`: wasm-bindgen wrapper the extension loads.
 - `crates/hunch-eval`: native CLI that scores the core against datasets in `data/` (gitignored). Run `cargo run -p hunch-eval --release -- --help`.
 - `extension/`: WXT + TypeScript. Its build and browser commands run from `extension/`.
+- `packages/ui` (`@hunch/ui`): shared UI logic and components.
+- `packages/harness` (`@hunch/harness`): Chrome for Testing harness. Generic parts (install, launch or attach over DevTools, closed shadow roots, console errors, screenshots, the test-beat page) in `src/`, the extension driver and CLI in `src/extension/`.
 - The repo root is a pnpm workspace (`extension`, `packages/*`) with one lockfile. Run `pnpm install` from the root.
 
 ## Checks (same as CI)
@@ -24,15 +26,16 @@ pnpm build:wasm && pnpm build     # builds extension/.output/chrome-mv3
 
 ## Running the extension in a browser
 
-`pnpm browser` loads the built extension into Chrome for Testing and drives it with Puppeteer. It never touches your own Chrome profile.
+`pnpm browser` loads the built extension into Chrome for Testing and drives it with Puppeteer. It never touches your own Chrome profile. The commands are thin calls into `@hunch/harness`'s `hunch-harness` CLI and work from `extension/` or the repo root.
 
 ```sh
-pnpm browser:install                  # once: downloads Chrome for Testing into extension/.chrome
+pnpm browser:install                  # once: downloads Chrome for Testing into .chrome at the repo root
 pnpm build:wasm && pnpm build         # the harness runs the last build
 pnpm browser:check                    # headless smoke test: built-in 120 BPM A minor beat, exit 1 on a miss
 pnpm browser --url <url> --seconds 20 # any page; prints overlay readouts as they change
 pnpm browser --screenshot shot.png    # screenshot of the page with the overlay
 pnpm browser --headed --keep-open     # visible window, left open to poke at
+pnpm browser --connect 9222           # attach to a running browser by port, http URL or ws endpoint
 ```
 
 - It clicks the toolbar icon with Puppeteer's `triggerAction`, which counts as the user action tab capture needs.
@@ -41,4 +44,5 @@ pnpm browser --headed --keep-open     # visible window, left open to poke at
   - Tab capture doesn't hear Web Audio contexts that were already running when capture started.
 - Audio plays through the speakers while it runs.
   - Puppeteer's default `--mute-audio` also silences tab capture, so the harness turns it off.
+- `--connect` needs the browser started with `--enable-unsafe-extension-debugging` to install the extension. It opens its own tab and only detaches at the end.
 - Branded Chrome ignores unpacked extensions loaded from the command line, so the harness uses Chrome for Testing.

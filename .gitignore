@@ -3,10 +3,10 @@
 
 # Node / extension
 node_modules/
+/.chrome/
 /extension/.output/
 /extension/.wxt/
 /extension/src/wasm/pkg/
-/extension/.chrome/
 
 # Local data (datasets, personal beat set)
 /data/
