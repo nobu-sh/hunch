@@ -14,6 +14,12 @@ export default defineConfig({
     },
     action: {
       default_title: 'Toggle Hunch on this tab',
+      default_icon: {
+        16: 'icon/16.png',
+        32: 'icon/32.png',
+        48: 'icon/48.png',
+        128: 'icon/128.png',
+      },
     },
     commands: {
       _execute_action: {
