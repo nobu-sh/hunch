@@ -2,3 +2,4 @@
 .wxt/
 src/wasm/pkg/
 pnpm-lock.yaml
+.chrome/
