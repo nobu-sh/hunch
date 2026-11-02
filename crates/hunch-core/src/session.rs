@@ -95,6 +95,19 @@ impl Session {
         events
     }
 
+    /// For a stream that has stopped: ends any open window as if its sound stopped here, then
+    /// resets. The ending events (any last estimates, then `WindowEnded`) follow the same rules
+    /// as a window that silence closed, including `too_short`. A quiet stretch at the end that
+    /// hadn't closed the window yet is left out of it.
+    pub fn finish(&mut self) -> Vec<SessionEvent> {
+        let mut events = Vec::new();
+        if let Some(end_sample) = self.segmenter.open_window_end() {
+            self.end_window(end_sample, &mut events);
+        }
+        self.reset();
+        events
+    }
+
     /// Drops any open window without ending it. Window ids and times keep counting.
     pub fn reset(&mut self) {
         self.clock_offset = self.samples_pushed;

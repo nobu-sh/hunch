@@ -37,8 +37,8 @@ pnpm browser:desktop  # with desktop:dev running: attach to the app's page and p
 ```
 
 - The window is the overlay: transparent, undecorated, and resized to the panel or pill. Drag the header or pill to move it; close quits.
-- The UI subscribes to `session-event` and `source-status`, then calls the `listen` command, which starts a fresh session so no event is missed. `listen` starts the remembered source (`remembered-source.json` in the app data dir) if it still exists, else the default output device's loopback.
-- Commands: `list_sources` (`{ sources, listsApps }`), `select_source { id }` (fresh session on that source, remembered), `current_source`, `listen`. `source-status` is `{ sourceId, state: listening | ended | silent | failed, message }`; `silent` means an app or output device gave only digital silence for 15 s.
+- The UI subscribes to `session-event` and `source-status`, then calls the `listen` command, which starts a fresh session so no event is missed. `listen` starts the remembered source (`remembered-source.json` in the app data dir) if it's still around, else the default output device's loopback. Devices are remembered by id, apps by executable name, so a restarted app is found again.
+- Commands: `list_sources` (`{ sources, listsApps }`), `select_source { id }` (fresh session on that source, remembered), `current_source`, `listen`. `source-status` is `{ sourceId, state: listening | ended | silent | failed, message }`; `silent` means an app or output device gave only digital silence for 15 s. When a source ends or is replaced, its open window is finished first: its last `session-event`s, ending in `windowEnded`, come before `ended`/`failed` or the next source's `listening`.
 - Debug builds list a dev source, `dev:test-beat` (120 BPM, A minor, synthesized). `HUNCH_DEV_SOURCE=test-beat pnpm desktop:dev` makes `listen` start it.
 - Tauri is pinned to 2.11 (crate and npm) because 2.12 needs rustc 1.90.
 

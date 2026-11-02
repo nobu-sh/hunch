@@ -17,6 +17,8 @@ export interface SourcePickerControls {
   close: () => void;
   /** The source being listened to, as far as the client has said. */
   current: AudioSource | null;
+  /** Reads the current source again, for when it changed outside the picker. */
+  refreshCurrent: () => void;
   /** Ready to spread on `SourcePicker`. */
   pickerProps: SourcePickerProps;
 }
@@ -36,20 +38,31 @@ export function useSourcePicker(params: {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const readCurrent = useCallback(
+    (onRead: (source: AudioSource | null) => void) => {
+      client
+        .currentSource()
+        .then(onRead)
+        .catch((reason: unknown) => {
+          console.warn('Hunch could not read the current source:', reason);
+        });
+    },
+    [client],
+  );
+
   useEffect(() => {
     let isCancelled = false;
-    client
-      .currentSource()
-      .then((source) => {
-        if (!isCancelled) setCurrent(source);
-      })
-      .catch((reason: unknown) => {
-        console.warn('Hunch could not read the current source:', reason);
-      });
+    readCurrent((source) => {
+      if (!isCancelled) setCurrent(source);
+    });
     return () => {
       isCancelled = true;
     };
-  }, [client]);
+  }, [readCurrent]);
+
+  const refreshCurrent = useCallback(() => {
+    readCurrent(setCurrent);
+  }, [readCurrent]);
 
   const open = useCallback(() => {
     setIsOpen(true);
@@ -98,6 +111,7 @@ export function useSourcePicker(params: {
     open,
     close,
     current,
+    refreshCurrent,
     pickerProps: {
       sources,
       currentId: current?.id ?? null,

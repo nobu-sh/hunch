@@ -1,4 +1,5 @@
 import type { Estimate, SessionEvent } from './estimate';
+import type { SourceState } from './sources';
 
 export const HISTORY_LIMIT = 10;
 /** Estimates kept per window; enough for the lock rule's streak. */
@@ -29,6 +30,11 @@ export interface SessionState {
   /** Newest first. Windows that were `tooShort` are left out. */
   history: HistoryEntry[];
   error: string | null;
+  /**
+   * The source stopped, by closing or failing, so nothing more will be heard. Only frontends that
+   * follow a source's status set it; absent means listening.
+   */
+  isStopped?: boolean;
 }
 
 export function createSessionState(tabId: number): SessionState {
@@ -37,6 +43,31 @@ export function createSessionState(tabId: number): SessionState {
 
 export function withError(params: { state: SessionState; error: string }): SessionState {
   return { ...params.state, error: params.error };
+}
+
+/** A fresh session for a newly picked source. The history carries over. */
+export function withFreshSession(state: SessionState): SessionState {
+  return { ...createSessionState(state.tabId), history: state.history };
+}
+
+/**
+ * Follows the source's status. `ended` and `failed` stop the session and clear the current window,
+ * whose result is already in history. `listening` resumes it. `silent` changes nothing.
+ */
+export function applySourceStatus(params: {
+  state: SessionState;
+  sourceState: SourceState;
+}): SessionState {
+  const { state, sourceState } = params;
+  switch (sourceState) {
+    case 'ended':
+    case 'failed':
+      return { ...state, window: null, isStopped: true };
+    case 'listening':
+      return state.isStopped ? { ...state, isStopped: false } : state;
+    case 'silent':
+      return state;
+  }
 }
 
 export function latestEstimate(window: WindowState | null): Estimate | null {

@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 use crate::capture_feed::CaptureFeed;
 use crate::feed::AudioFeed;
 use crate::listener::{self, Listener, emit};
-use crate::remembered::RememberedSourceFile;
+use crate::remembered::{RememberedSource, RememberedSourceFile};
 use crate::sources::{
     self, Available, HAS_DEV_SOURCE, Listenable, SourceDto, SourceListDto, StartChoice,
 };
@@ -54,7 +54,7 @@ pub async fn select_source(
         state: &state,
         source: &source,
     })?;
-    if let Err(error) = state.remembered.save(source.id()) {
+    if let Err(error) = state.remembered.save(&RememberedSource::of(&source)) {
         eprintln!("hunch: couldn't remember the selected source: {error}");
     }
     Ok(())
@@ -95,7 +95,7 @@ fn start_chosen(app: &AppHandle, state: &AppState) -> Result<(), StartFailure> {
     let remembered = state.remembered.load();
     let source = sources::choose_start(StartChoice {
         listenables: &listenables,
-        remembered: remembered.as_deref(),
+        remembered: remembered.as_ref(),
         wants_dev_source: wants_dev_source(),
     })
     .ok_or_else(|| without_source(NO_SOURCE_MESSAGE.to_owned()))?;

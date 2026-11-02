@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  applySourceStatus,
   createSessionState,
   errorMessage,
   overlayView,
   sourceNotice,
   withError,
+  withFreshSession,
   type SessionState,
   type SourceStatus,
 } from '@hunch/ui';
@@ -36,9 +38,9 @@ export function App() {
   const rootRef = useRef<HTMLDivElement>(null);
   const picker = useSourcePicker({
     client: backend,
-    // The backend starts a fresh session on the new source.
+    // The backend starts a fresh session on the new source, after the old one's last window ends.
     onSwitch: () => {
-      setState(createSessionState(SESSION_ID));
+      setState(withFreshSession);
       setStatus(null);
     },
   });
@@ -50,7 +52,13 @@ export function App() {
     subscribe: () => followSession({ backend, onChange: setState }),
     onError: showError,
   });
-  useSubscription({ subscribe: () => backend.onSourceStatus(setStatus), onError: showError });
+  const followStatus = (next: SourceStatus) => {
+    setStatus(next);
+    // `listen` may have started a source the picker hasn't heard of, so its notices can name it.
+    if (next.state === 'listening') picker.refreshCurrent();
+    setState((current) => applySourceStatus({ state: current, sourceState: next.state }));
+  };
+  useSubscription({ subscribe: () => backend.onSourceStatus(followStatus), onError: showError });
 
   useEffect(() => {
     if (rootRef.current === null) return;
