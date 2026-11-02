@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
-use hunch_core::Session;
 use hunch_core::contract::SessionEventDto;
+use hunch_core::{Session, SessionEvent};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -35,7 +35,8 @@ pub struct Restart {
 }
 
 impl Listener {
-    /// Stops the current session, if any, and starts a new one from `feed`.
+    /// Stops the current session, if any, once it has finished its open window, then starts a new
+    /// one from `feed`.
     pub fn restart(&self, Restart { app, feed, source }: Restart) {
         let mut running = self.lock();
         if let Some(previous) = running.take() {
@@ -84,6 +85,10 @@ struct Listen {
     should_stop: Arc<AtomicBool>,
 }
 
+/// Emits `source-status` `listening`, then the session's events as audio arrives. When the feed
+/// ends or the session is replaced, the open window is finished first, so its last `session-event`s
+/// (ending in `windowEnded`) come before the `source-status` `ended` or `failed`, or before the
+/// next session's `listening`.
 fn listen(
     Listen {
         app,
@@ -101,14 +106,14 @@ fn listen(
         SourceStatusDto::listening(&source),
     );
 
-    while !should_stop.load(Ordering::Relaxed) {
+    let end = loop {
+        if should_stop.load(Ordering::Relaxed) {
+            break None;
+        }
         let samples = match feed.next() {
             FeedEvent::Audio(samples) => samples,
             FeedEvent::Waiting => Vec::new(),
-            FeedEvent::Ended(end) => {
-                emit(&app, SOURCE_STATUS_EVENT, end_status(&source, end));
-                return;
-            }
+            FeedEvent::Ended(end) => break Some(end),
         };
         let change = silence.observe(Observation {
             elapsed: started.elapsed(),
@@ -117,9 +122,18 @@ fn listen(
         if let Some(change) = change {
             emit(&app, SOURCE_STATUS_EVENT, silence_status(&source, change));
         }
-        for event in session.push(&samples) {
-            emit(&app, SESSION_EVENT, SessionEventDto::from(event));
-        }
+        emit_session_events(&app, session.push(&samples));
+    };
+
+    emit_session_events(&app, session.finish());
+    if let Some(end) = end {
+        emit(&app, SOURCE_STATUS_EVENT, end_status(&source, end));
+    }
+}
+
+fn emit_session_events(app: &AppHandle, events: Vec<SessionEvent>) {
+    for event in events {
+        emit(app, SESSION_EVENT, SessionEventDto::from(event));
     }
 }
 
