@@ -8,3 +8,18 @@ body {
 #app {
   display: inline-block;
 }
+
+/*
+ * The window has a native acrylic blur behind it, and on Windows 11 the system rounds its corners
+ * and draws its border and shadow. So the panel tints the blur instead of standing alone, and
+ * leaves the edge to the window: a CSS border or radius would show a second edge inside it.
+ */
+:root {
+  --bg: rgba(18, 18, 22, 0.72);
+}
+.panel,
+.pill {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
