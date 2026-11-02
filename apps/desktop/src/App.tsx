@@ -54,6 +54,8 @@ export function App() {
   });
   const followStatus = (next: SourceStatus) => {
     setStatus(next);
+    // `listen` may have started a source the picker hasn't heard of, so its notices can name it.
+    if (next.state === 'listening') picker.refreshCurrent();
     setState((current) => applySourceStatus({ state: current, sourceState: next.state }));
   };
   useSubscription({ subscribe: () => backend.onSourceStatus(followStatus), onError: showError });
