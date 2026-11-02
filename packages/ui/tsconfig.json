@@ -11,7 +11,9 @@
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true
+    "noImplicitOverride": true,
+    "jsx": "react-jsx",
+    "types": ["vite/client", "@testing-library/jest-dom/vitest"]
   },
-  "include": ["src"]
+  "include": ["src", "preview", "vitest.config.ts", "vitest.setup.ts"]
 }

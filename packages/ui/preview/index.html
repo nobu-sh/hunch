@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hunch overlay preview</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        min-height: 100vh;
+        box-sizing: border-box;
+        background: linear-gradient(135deg, #3a4b6b, #b8c4d6);
+        font-family: system-ui, sans-serif;
+      }
+      #previews {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 24px;
+      }
+      figure {
+        margin: 0;
+      }
+      figcaption {
+        margin-bottom: 8px;
+        color: #fff;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="previews"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
