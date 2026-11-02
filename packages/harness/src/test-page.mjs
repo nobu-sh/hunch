@@ -133,3 +133,19 @@ export async function startTestPage() {
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }
+
+/** Resolves once the test page's beat is playing. */
+export async function waitForTestBeat(page) {
+  await page.waitForFunction(() => document.querySelector('audio')?.paused === false);
+}
+
+/** Pauses the beat. Hunch closes its listening window after a couple of seconds of silence. */
+export async function pauseTestBeat(page) {
+  await page.evaluate(() => document.querySelector('audio')?.pause());
+}
+
+/** Resumes the beat where it paused. */
+export async function playTestBeat(page) {
+  await page.evaluate(() => document.querySelector('audio')?.play());
+  await waitForTestBeat(page);
+}

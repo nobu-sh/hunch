@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { checkTestBeat, formatReadout } from './overlay.mjs';
 
 const overlay = {
+  isCollapsed: false,
   status: 'Listening',
   key: 'A minor',
   relative: 'C major',

@@ -32,3 +32,23 @@ function findShadowRoot({ node, hostName }) {
   }
   return null;
 }
+
+/**
+ * Clicks the center of the element matching `selector` inside `hostName`'s shadow root, even a
+ * closed one, with a real mouse click so pointer handlers see it too.
+ */
+export async function clickInShadowRoot({ page, hostName, selector }) {
+  const box = await callInShadowRoot({
+    page,
+    hostName,
+    functionDeclaration: `function () {
+      const element = this.querySelector(${JSON.stringify(selector)});
+      if (!element) return null;
+      const { x, y, width, height } = element.getBoundingClientRect();
+      return { x, y, width, height };
+    }`,
+  });
+  const isVisible = box !== null && box.width > 0 && box.height > 0;
+  if (!isVisible) throw new Error(`No visible ${selector} in <${hostName}>'s shadow root`);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}

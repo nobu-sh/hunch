@@ -1,15 +1,18 @@
 // Reading and judging what the Hunch overlay shows.
-import { callInShadowRoot } from '../devtools.mjs';
+import { callInShadowRoot, clickInShadowRoot } from '../devtools.mjs';
 import { TEST_BEAT } from '../test-page.mjs';
 
-const OVERLAY_TAG = 'hunch-overlay';
+export const OVERLAY_TAG = 'hunch-overlay';
 /** Keys that count as right for the test beat: A minor or its relative, C major. */
 const TEST_BEAT_KEYS = ['A minor', 'C major'];
 const BPM_TOLERANCE = 0.04;
+const WAIT_POLL_MS = 200;
 
 const READ_OVERLAY = `function () {
   const text = (ref) => this.querySelector('[data-ref="' + ref + '"]')?.textContent.trim() || null;
+  const pill = this.querySelector('[data-ref="pill"]');
   return {
+    isCollapsed: pill !== null && pill.getBoundingClientRect().width > 0,
     status: text('status'),
     key: text('key'),
     relative: text('relative'),
@@ -24,6 +27,28 @@ const READ_OVERLAY = `function () {
 /** The overlay's readouts, or null when it isn't mounted. Its shadow root is closed to pages. */
 export function readOverlay(page) {
   return callInShadowRoot({ page, hostName: OVERLAY_TAG, functionDeclaration: READ_OVERLAY });
+}
+
+/** Clicks the overlay control marked `data-ref="<ref>"`, such as `collapse` or `pill`. */
+export function clickOverlay({ page, ref }) {
+  return clickInShadowRoot({ page, hostName: OVERLAY_TAG, selector: `[data-ref="${ref}"]` });
+}
+
+/**
+ * Polls the overlay until `isReady(overlay)` holds and returns that reading. Throws after
+ * `timeoutMs`, naming what it waited for and what the overlay last showed.
+ */
+export async function waitForOverlay({ page, isReady, description, timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let overlay = null;
+  while (Date.now() < deadline) {
+    overlay = await readOverlay(page);
+    if (overlay && isReady(overlay)) return overlay;
+    await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
+  }
+  throw new Error(
+    `Timed out after ${String(timeoutMs)} ms waiting for ${description}; overlay showed: ${formatReadout(overlay)}`,
+  );
 }
 
 export function formatReadout(overlay) {

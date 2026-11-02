@@ -27,3 +27,30 @@ export async function installExtension({ browser, extensionDir }) {
 export function extensionUrlPrefix(extension) {
   return `chrome-extension://${extension.id}/`;
 }
+
+/**
+ * Makes the extension show a capture error on the tab at `pageUrl`, by sending the background the
+ * same message its offscreen document sends when a tab's capture fails.
+ */
+export async function reportCaptureError({ browser, extension, pageUrl, message }) {
+  const prefix = extensionUrlPrefix(extension);
+  const workerTarget = await browser.waitForTarget(
+    (target) => target.type() === 'service_worker' && target.url().startsWith(prefix),
+  );
+  const worker = await workerTarget.worker();
+  const tabId = await worker.evaluate(async (url) => {
+    const tabs = await chrome.tabs.query({});
+    return tabs.find((tab) => tab.url?.startsWith(url))?.id ?? null;
+  }, pageUrl);
+  if (tabId === null) throw new Error(`No tab open at ${pageUrl} to report an error on`);
+
+  // The background ignores messages it sends itself, so this one comes from the offscreen page.
+  const offscreenTarget = await browser.waitForTarget((target) =>
+    target.url().startsWith(`${prefix}offscreen`),
+  );
+  const offscreen = await offscreenTarget.asPage();
+  await offscreen.evaluate(
+    (error) => chrome.runtime.sendMessage({ type: 'capture-error', ...error }),
+    { tabId, message },
+  );
+}

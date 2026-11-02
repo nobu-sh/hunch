@@ -1,2 +1,9 @@
 export { extensionUrlPrefix, installExtension } from './driver.mjs';
-export { checkTestBeat, formatReadout, readOverlay } from './overlay.mjs';
+export {
+  checkTestBeat,
+  clickOverlay,
+  formatReadout,
+  OVERLAY_TAG,
+  readOverlay,
+  waitForOverlay,
+} from './overlay.mjs';

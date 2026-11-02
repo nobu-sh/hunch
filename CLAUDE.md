@@ -26,18 +26,21 @@ pnpm build:wasm && pnpm build     # builds extension/.output/chrome-mv3
 
 ## Running the extension in a browser
 
-`pnpm browser` loads the built extension into Chrome for Testing and drives it with Puppeteer. It never touches your own Chrome profile. The commands are thin calls into `@hunch/harness`'s `hunch-harness` CLI and work from `extension/` or the repo root.
+`pnpm browser` loads the built extension into Chrome for Testing and drives it with Puppeteer, in a visible window unless `--headless` is passed. It never touches your own Chrome profile. The commands are thin calls into `@hunch/harness`'s `hunch-harness` CLI and work from `extension/` or the repo root.
 
 ```sh
 pnpm browser:install                  # once: downloads Chrome for Testing into .chrome at the repo root
 pnpm build:wasm && pnpm build         # the harness runs the last build
 pnpm browser:check                    # headless smoke test: built-in 120 BPM A minor beat, exit 1 on a miss
+pnpm browser:screenshots              # headed: one PNG per overlay state in extension/.output/screenshots (--out <dir>)
 pnpm browser --url <url> --seconds 20 # any page; prints overlay readouts as they change
 pnpm browser --screenshot shot.png    # screenshot of the page with the overlay
-pnpm browser --headed --keep-open     # visible window, left open to poke at
+pnpm browser --keep-open              # leave the window open to poke at
+pnpm browser --headless               # no window, for unattended runs
 pnpm browser --connect 9222           # attach to a running browser by port, http URL or ws endpoint
 ```
 
+- UI changes are checked headed: run `pnpm browser:screenshots` and look at each PNG (listening, analyzing, locked, collapsed, expanded, history, error). Headless is for unattended plumbing checks like `browser:check`; model accuracy is tested against the core with `hunch-eval`, not through the browser.
 - It clicks the toolbar icon with Puppeteer's `triggerAction`, which counts as the user action tab capture needs.
 - It reads the overlay through DevTools, because the overlay's shadow root is closed.
 - The test page plays through an `<audio>` element.

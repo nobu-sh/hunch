@@ -7,11 +7,11 @@ const LOCAL_HOST = '127.0.0.1';
 const HEADLESS_VIEWPORT = { width: 1280, height: 800 };
 
 /**
- * Launches Chrome for Testing, or connects to `connect` when given: a port, an http(s) DevTools
- * URL, or a ws(s) browser endpoint. `close` shuts a launched browser and only detaches from a
+ * Launches Chrome for Testing, in a visible window unless `headless`, or connects to `connect`
+ * when given: a port, an http(s) DevTools URL, or a ws(s) browser endpoint. `close` shuts a launched browser and only detaches from a
  * connected one.
  */
-export async function openBrowser({ connect, headed = false, enableExtensions = false }) {
+export async function openBrowser({ connect, headless = false, enableExtensions = false }) {
   if (connect) {
     const browser = await puppeteer.connect({ ...connectTarget(connect), defaultViewport: null });
     return { browser, isConnected: true, close: () => browser.disconnect() };
@@ -19,10 +19,10 @@ export async function openBrowser({ connect, headed = false, enableExtensions = 
 
   const browser = await puppeteer.launch({
     executablePath: await chromeExecutable(),
-    headless: !headed,
+    headless,
     enableExtensions,
     pipe: true,
-    defaultViewport: headed ? null : HEADLESS_VIEWPORT,
+    defaultViewport: headless ? HEADLESS_VIEWPORT : null,
     // A muted browser also mutes tab capture, so pages play out loud, even headless.
     ignoreDefaultArgs: ['--mute-audio'],
     args: ['--autoplay-policy=no-user-gesture-required'],
