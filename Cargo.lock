@@ -251,6 +251,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
+name = "hunch-capture"
+version = "0.1.0"
+dependencies = [
+ "rubato",
+]
+
+[[package]]
 name = "hunch-core"
 version = "0.1.0"
 dependencies = [

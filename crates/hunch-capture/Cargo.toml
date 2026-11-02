@@ -1,0 +1,10 @@
+[package]
+name = "hunch-capture"
+description = "Audio capture from devices and apps, converted for hunch-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rubato = "4"
