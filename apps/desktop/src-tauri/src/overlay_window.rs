@@ -3,7 +3,6 @@
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 use crate::bounds::{self, Bounds};
@@ -60,27 +59,12 @@ pub fn set_always_on_top(app: AppHandle, enabled: bool) -> Result<(), String> {
     apply_always_on_top(&app, enabled)
 }
 
-#[derive(Debug, Deserialize)]
-pub struct BoundsDto {
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-}
-
-/// Moves and sizes the window together, in physical pixels, so a resize around a corner other
-/// than the top-left doesn't jump. A sync command, so it runs on the main thread.
+/// Moves and sizes the window together so its client area is at `bounds`, in physical pixels,
+/// and a resize around a corner other than the top-left doesn't jump. A sync command, so it runs
+/// on the main thread.
 #[tauri::command]
-pub fn set_window_bounds(window: WebviewWindow, bounds: BoundsDto) -> Result<(), String> {
-    bounds::set(
-        &window,
-        Bounds {
-            x: bounds.x,
-            y: bounds.y,
-            width: bounds.width,
-            height: bounds.height,
-        },
-    )
+pub fn set_window_bounds(window: WebviewWindow, bounds: Bounds) -> Result<(), String> {
+    bounds::set_client(&window, bounds)
 }
 
 /// Applies, remembers and announces always-on-top, for the header toggle and the tray alike.
