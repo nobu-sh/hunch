@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/hunch-capture",
     "crates/hunch-core",
     "crates/hunch-wasm",
     "crates/hunch-eval",

@@ -1,0 +1,21 @@
+[package]
+name = "hunch-capture"
+description = "Audio capture from devices and apps, converted for hunch-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+hunch-core.workspace = true
+rubato = "4"
+
+[target.'cfg(windows)'.dependencies]
+wasapi = "0.26"
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Media_Audio",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Threading",
+] }
