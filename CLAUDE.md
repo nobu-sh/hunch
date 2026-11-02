@@ -11,6 +11,7 @@ Detects the key and BPM of audio as it plays. A Rust analysis core runs natively
 - `extension/`: WXT + TypeScript. Its build commands run from `extension/`. `extension/dev/` holds the dev-only Hunch browser mixins and the test-beat page.
 - `apps/desktop`: the Tauri 2 desktop app (Windows first). `src-tauri/` is the Rust backend, a workspace crate that runs a `hunch-core` `Session` from an `AudioFeed` (real capture through `hunch-capture`, or the synthesized test beat) and emits each event as a `session-event` Tauri event. `src/` is the React UI built from `@hunch/ui`; `dev/` holds its browser mixin and dev script.
 - `packages/ui` (`@hunch/ui`): shared UI logic and components.
+- `packages/release` (`@hunch/release`): the `release:version` and `release:check` scripts, run by Node the same way.
 - `packages/browser` (`@hunch/browser`): a generic dev browser for agents, with no Hunch knowledge. It handles Chrome for Testing, launching or attaching, unpacked extensions, the DevTools endpoint file, console output and mixins. TypeScript that Node runs directly by stripping types: no build step.
 - The repo root is a pnpm workspace (`apps/*`, `extension`, `packages/*`) with one lockfile. Run `pnpm install` from the root.
 
@@ -21,6 +22,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 pnpm install --frozen-lockfile
+pnpm release:check
 pnpm lint && pnpm format:check && pnpm typecheck && pnpm test   # every workspace package
 # in extension/
 pnpm build:wasm && pnpm build     # builds extension/.output/chrome-mv3
@@ -42,8 +44,22 @@ pnpm browser:desktop  # with desktop:dev running: attach to the app's page and p
 - Debug builds list a dev source, `dev:test-beat` (120 BPM, A minor, synthesized). `HUNCH_DEV_SOURCE=test-beat pnpm desktop:dev` makes `listen` start it.
 - Tauri is pinned to 2.11 (crate and npm) because 2.12 needs rustc 1.90.
 - The installer is an unsigned, per-user NSIS setup (`Hunch_<version>_x64-setup.exe`, no admin prompt). It installs silently with `/S /D=<dir>`, and `uninstall.exe /S` removes it.
-- `.github/workflows/desktop-release.yml` builds the installer on `windows-latest` and uploads it as the `hunch-windows-installer` artifact. It runs on manual dispatch, `desktop-v*` tags, and pull requests that change the workflow.
+- The release workflow builds the installer; see "Versions and releases".
 - The icon source is `apps/desktop/icons-src/icon.svg`. To change it, render a 1024 px PNG and run `pnpm --filter hunch-desktop tauri icon <png>`, then delete the outputs Windows doesn't use (`android/`, `ios/`, `icon.icns`, `Square*`, `StoreLogo.png`, `64x64.png`).
+
+## Versions and releases
+
+The extension and the desktop app ship with one version. The root `package.json` is the source of truth; `extension/package.json` (WXT's manifest version), `apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json` and `[workspace.package]` in `Cargo.toml` (every crate inherits it) follow it. Internal packages like `@hunch/ui` stay at `0.0.0`.
+
+```sh
+pnpm release:version 0.2.0         # writes every file and refreshes Cargo.lock; plain MAJOR.MINOR.PATCH
+pnpm release:check                 # exit 1, listing mismatches, unless they agree (CI's lint job runs it)
+pnpm release:check --tag v0.2.0    # also checks the tag names the version
+```
+
+To release: `pnpm release:version 0.2.0`, commit, tag `v0.2.0`, push the tag.
+
+`.github/workflows/release.yml` runs on `v*` tags, pushes to master, manual dispatch, and pull requests that change it or `packages/release`. On a tag it fails unless the tag matches the version. It uploads `hunch-extension-<version>` (the WXT zip) and `hunch-desktop-<version>` (the NSIS installer) to the run's page in Actions; runs not on a tag add `+<short sha>`, e.g. `hunch-extension-0.1.0+abc1234`. GitHub Releases and code signing come later.
 
 ## Running the extension in a browser
 
