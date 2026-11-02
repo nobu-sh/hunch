@@ -8,5 +8,5 @@
     }
   },
   // The browser mixins run in Node and have their own tsconfig.
-  "exclude": ["browser", "node_modules", ".output"]
+  "exclude": ["dev", "node_modules", ".output"]
 }

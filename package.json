@@ -9,8 +9,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "browser": "hunch-browser",
-    "browser:extension": "hunch-browser --mixin extension/browser/dev.ts",
-    "browser:check": "hunch-browser --mixin extension/browser/check.ts"
+    "browser:extension": "hunch-browser --mixin extension/dev/browser.ts",
+    "browser:check": "hunch-browser --mixin extension/dev/browser-check.ts"
   },
   "devDependencies": {
     "@hunch/browser": "workspace:*"

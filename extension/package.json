@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "wxt prepare && tsc --noEmit && tsc --noEmit -p browser",
+    "typecheck": "wxt prepare && tsc --noEmit && tsc --noEmit -p dev",
     "test": "vitest run",
     "build:wasm": "node scripts/build-wasm.mjs"
   },

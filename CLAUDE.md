@@ -7,7 +7,7 @@ Detects the key and BPM of audio as it plays. A Rust analysis core runs natively
 - `crates/hunch-core`: DSP and models (key, tempo, listening windows). No IO.
 - `crates/hunch-wasm`: wasm-bindgen wrapper the extension loads.
 - `crates/hunch-eval`: native CLI that scores the core against datasets in `data/` (gitignored). Run `cargo run -p hunch-eval --release -- --help`.
-- `extension/`: WXT + TypeScript. Its build commands run from `extension/`. `extension/browser/` holds the Hunch browser mixins and the test-beat page.
+- `extension/`: WXT + TypeScript. Its build commands run from `extension/`. `extension/dev/` holds the dev-only Hunch browser mixins and the test-beat page.
 - `packages/ui` (`@hunch/ui`): shared UI logic and components.
 - `packages/browser` (`@hunch/browser`): a generic dev browser for agents, with no Hunch knowledge. It handles Chrome for Testing, launching or attaching, unpacked extensions, the DevTools endpoint file, console output and mixins. TypeScript that Node runs directly by stripping types: no build step.
 - The repo root is a pnpm workspace (`extension`, `packages/*`) with one lockfile. Run `pnpm install` from the root.
@@ -68,9 +68,9 @@ export default defineMixin({
 
 The context also has `browser`, `options`, `endpoint`, the console `errors` collected so far, a `signal` that aborts when the browser closes or time runs out, and `seconds`.
 
-- The Hunch mixins live in `extension/browser/`:
-  - `dev.ts`: the build on the test beat. It turns Hunch on and prints the tab's session state from `chrome.storage.session` until the browser closes.
-  - `check.ts`: headless for 12 s. It passes on a window with estimates, a tempo near 120 BPM (or half or double), and no session or console errors. The key isn't judged.
+- The Hunch mixins live in `extension/dev/`:
+  - `browser.ts` (`pnpm browser:extension`): the build on the test beat. It turns Hunch on and prints the tab's session state from `chrome.storage.session` until the browser closes.
+  - `browser-check.ts` (`pnpm browser:check`): headless for 12 s. It passes on a window with estimates, a tempo near 120 BPM (or half or double), and no session or console errors. The key isn't judged.
 - Check UI headed: open it, take screenshots, and look at them. Model accuracy is tested against the core with `hunch-eval`, not through the browser.
 - Branded Chrome ignores unpacked extensions loaded from the command line, so this uses Chrome for Testing. Extensions are installed after launch with `browser.installExtension`, because passing them to `launch` doesn't finish loading them. A toolbar click before the service worker runs is lost, so loading waits for it.
 - Audio isn't muted unless you pass `--mute`: muting Chrome also silences tab capture.

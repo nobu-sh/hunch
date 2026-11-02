@@ -49,8 +49,8 @@ describe('parseCommandLine', () => {
   });
 
   it('takes a mixin path', () => {
-    expect(parseCommandLine(['--mixin', 'extension/browser/dev.ts']).mixin).toBe(
-      'extension/browser/dev.ts',
+    expect(parseCommandLine(['--mixin', 'extension/dev/browser.ts']).mixin).toBe(
+      'extension/dev/browser.ts',
     );
   });
 
