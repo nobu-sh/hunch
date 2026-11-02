@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/hunch-core", "crates/hunch-wasm", "crates/hunch-eval"]
+members = [
+    "crates/hunch-core",
+    "crates/hunch-wasm",
+    "crates/hunch-eval",
+    "apps/desktop/src-tauri",
+]
 
 [workspace.package]
 version = "0.1.0"

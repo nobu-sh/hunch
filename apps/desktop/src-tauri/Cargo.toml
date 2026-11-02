@@ -1,0 +1,15 @@
+[package]
+name = "hunch-desktop"
+description = "Hunch desktop app: live key and BPM of what the computer is playing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+hunch-core = { workspace = true, features = ["serde"] }
+# Pinned to 2.11: 2.12 needs rustc 1.90. Keep @tauri-apps/api and cli on the same minor.
+tauri = { version = "~2.11", features = [] }

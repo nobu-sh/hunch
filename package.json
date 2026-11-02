@@ -10,7 +10,9 @@
     "test": "pnpm -r test",
     "browser": "hunch-browser",
     "browser:extension": "hunch-browser --mixin extension/dev/browser.ts",
-    "browser:check": "hunch-browser --mixin extension/dev/browser-check.ts"
+    "browser:check": "hunch-browser --mixin extension/dev/browser-check.ts",
+    "desktop:dev": "pnpm --filter hunch-desktop tauri:dev",
+    "desktop:build": "pnpm --filter hunch-desktop tauri:build"
   },
   "devDependencies": {
     "@hunch/browser": "workspace:*"
