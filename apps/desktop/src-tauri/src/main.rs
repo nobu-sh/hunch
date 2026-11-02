@@ -53,6 +53,7 @@ fn main() {
             overlay_window::save_window_position,
             overlay_window::set_always_on_top,
             overlay_window::set_window_bounds,
+            overlay_window::hide_to_tray,
         ])
         .run(tauri::generate_context!())
         .expect("Hunch failed to start its window");

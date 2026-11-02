@@ -59,6 +59,12 @@ pub fn set_always_on_top(app: AppHandle, enabled: bool) -> Result<(), String> {
     apply_always_on_top(&app, enabled)
 }
 
+/// The header's close button: the window goes to the tray and keeps listening.
+#[tauri::command]
+pub fn hide_to_tray(app: AppHandle) {
+    tray::set_visible(&app, false);
+}
+
 /// Moves and sizes the window together so its client area is at `bounds`, in physical pixels,
 /// and a resize around a corner other than the top-left doesn't jump. A sync command, so it runs
 /// on the main thread.

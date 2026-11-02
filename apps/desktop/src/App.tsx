@@ -24,11 +24,12 @@ import { anchorWindowTo } from './placement';
 import { followSession } from './session';
 import { useAlwaysOnTop } from './use-always-on-top';
 import { useSubscription } from './use-subscription';
-import { closeWindow, dragWindowFrom } from './window';
+import { dragWindowFrom } from './window';
 
 /** The app listens to one source at a time, so its session needs no real id yet. */
 const SESSION_ID = 0;
-const QUIT_LABELS: CloseLabels = { label: 'Quit', title: 'Quit Hunch' };
+// The tray menu quits, so closing only hides the window and its session keeps running.
+const HIDE_LABELS: CloseLabels = { label: 'Hide', title: 'Hide to tray' };
 
 async function copyToClipboard(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
@@ -83,8 +84,10 @@ export function App() {
         onExpand={() => {
           setIsCollapsed(false);
         }}
-        onClose={closeWindow}
-        closeLabels={QUIT_LABELS}
+        onClose={() => {
+          backend.hideToTray().catch(showError);
+        }}
+        closeLabels={HIDE_LABELS}
         onCopy={copyToClipboard}
         headerRef={dragWindowFrom}
         pillRef={dragWindowFrom}

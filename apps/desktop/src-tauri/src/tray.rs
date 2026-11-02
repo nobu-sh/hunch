@@ -98,16 +98,25 @@ fn toggle_visibility(app: &AppHandle) {
         return;
     };
     let is_visible = window.is_visible().unwrap_or(false);
-    let result = if is_visible {
-        window.hide()
-    } else {
+    set_visible(app, !is_visible);
+}
+
+/// Shows or hides the window and names the menu item for the opposite. A hidden window keeps
+/// its session running; only Quit exits.
+pub fn set_visible(app: &AppHandle, visible: bool) {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return;
+    };
+    let result = if visible {
         window.show().and_then(|()| window.set_focus())
+    } else {
+        window.hide()
     };
     if let Err(error) = result {
         eprintln!("hunch: couldn't show or hide the window: {error}");
         return;
     }
-    let text = if is_visible { SHOW_TEXT } else { HIDE_TEXT };
+    let text = if visible { HIDE_TEXT } else { SHOW_TEXT };
     let Some(items) = app.try_state::<TrayItems>() else {
         return;
     };

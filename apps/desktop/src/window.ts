@@ -1,4 +1,4 @@
-// The overlay is the whole window: it drags the window and closes it. `placement.ts` sizes it.
+// The overlay is the whole window: it drags it. `placement.ts` sizes it.
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 /** How far a press moves before it's a drag rather than a click. */
@@ -44,8 +44,4 @@ export function dragWindowFrom(handle: HTMLElement | null): (() => void) | undef
     handle.removeEventListener('pointermove', onPointerMove);
     handle.removeEventListener('pointerup', onPointerUp);
   };
-}
-
-export function closeWindow(): void {
-  getCurrentWindow().close().catch(reportFailure('close'));
 }
