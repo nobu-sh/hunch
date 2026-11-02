@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { createSessionState, type Estimate, type SessionState } from '@hunch/ui';
 import { badgeText } from './badge';
-import type { Estimate } from './messages';
-import { createTabState, type TabState } from './tab-state';
 
 const TAB_ID = 3;
 
@@ -17,16 +16,16 @@ function estimate(bpm: number | null): Estimate {
   };
 }
 
-function withWindowEstimate(bpm: number | null): TabState {
+function withWindowEstimate(bpm: number | null): SessionState {
   return {
-    ...createTabState(TAB_ID),
+    ...createSessionState(TAB_ID),
     window: { windowId: 1, startedAt: 0, recentEstimates: [estimate(bpm)], hasEnded: false },
   };
 }
 
 describe('badgeText', () => {
   it('shows ON while listening without an estimate', () => {
-    expect(badgeText(createTabState(TAB_ID))).toBe('ON');
+    expect(badgeText(createSessionState(TAB_ID))).toBe('ON');
   });
 
   it('shows ON when the estimate has no bpm yet', () => {
@@ -38,8 +37,8 @@ describe('badgeText', () => {
   });
 
   it('falls back to the last ended window when no window is open', () => {
-    const state: TabState = {
-      ...createTabState(TAB_ID),
+    const state: SessionState = {
+      ...createSessionState(TAB_ID),
       history: [{ windowId: 1, endedAt: 0, durationSeconds: 20, estimate: estimate(90.2) }],
     };
 

@@ -1,4 +1,4 @@
-import type { Estimate, SessionEvent } from './messages';
+import type { Estimate, SessionEvent } from './estimate';
 
 export const HISTORY_LIMIT = 10;
 /** Estimates kept per window; enough for the lock rule's streak. */
@@ -22,8 +22,8 @@ export interface HistoryEntry {
   estimate: Estimate | null;
 }
 
-/** Everything the overlay and badge need for one enabled tab. Lives in `storage.session`. */
-export interface TabState {
+/** Everything the readouts need for one listening session: the current window, history and error. */
+export interface SessionState {
   tabId: number;
   window: WindowState | null;
   /** Newest first. Windows that were `tooShort` are left out. */
@@ -31,11 +31,11 @@ export interface TabState {
   error: string | null;
 }
 
-export function createTabState(tabId: number): TabState {
+export function createSessionState(tabId: number): SessionState {
   return { tabId, window: null, history: [], error: null };
 }
 
-export function withError(params: { state: TabState; error: string }): TabState {
+export function withError(params: { state: SessionState; error: string }): SessionState {
   return { ...params.state, error: params.error };
 }
 
@@ -51,10 +51,10 @@ function appendEstimate(params: { window: WindowState; estimate: Estimate }): Wi
 }
 
 function endWindow(params: {
-  state: TabState;
+  state: SessionState;
   event: Extract<SessionEvent, { type: 'windowEnded' }>;
   now: number;
-}): TabState {
+}): SessionState {
   const { state, event, now } = params;
   // Short windows are UI sounds and notifications: drop them without a trace.
   if (event.tooShort) return { ...state, window: null };
@@ -76,12 +76,12 @@ function endWindow(params: {
   return { ...state, window, history };
 }
 
-/** Folds one `SessionEvent` into a tab's state. `now` stamps window start and end times. */
+/** Folds one `SessionEvent` into a session's state. `now` stamps window start and end times. */
 export function applySessionEvent(params: {
-  state: TabState;
+  state: SessionState;
   event: SessionEvent;
   now: number;
-}): TabState {
+}): SessionState {
   const { state, event, now } = params;
   switch (event.type) {
     case 'windowStarted':

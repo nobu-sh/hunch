@@ -1,4 +1,4 @@
-import type { HistoryRowView, OverlayView } from '@/lib/overlay-view';
+import type { HistoryRowView, OverlayView } from '@hunch/ui';
 
 const COPIED_FEEDBACK_MS = 1200;
 const EMPTY = '—';

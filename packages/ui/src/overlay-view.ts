@@ -1,7 +1,7 @@
 import { isBpmLocked, isKeyLocked } from './lock';
-import type { Estimate } from './messages';
+import type { Estimate } from './estimate';
 import { parseKey, relativeKey, scaleNotes, shortKeyLabel } from './music';
-import { latestEstimate, type HistoryEntry, type TabState } from './tab-state';
+import { latestEstimate, type HistoryEntry, type SessionState } from './session-state';
 
 /** Tuning offsets smaller than this are normal and not worth showing. */
 export const TUNING_DISPLAY_CENTS = 15;
@@ -31,7 +31,7 @@ export interface HistoryRowView {
   copyText: string;
 }
 
-/** Everything the overlay renders, derived from a tab's state. */
+/** Everything the overlay renders, derived from a session's state. */
 export interface OverlayView {
   status: string;
   statusTone: StatusTone;
@@ -114,7 +114,11 @@ function historyRow(entry: HistoryEntry): HistoryRowView {
   };
 }
 
-function statusLine(params: { state: TabState; estimate: Estimate | null; isLocked: boolean }): {
+function statusLine(params: {
+  state: SessionState;
+  estimate: Estimate | null;
+  isLocked: boolean;
+}): {
   status: string;
   statusTone: StatusTone;
 } {
@@ -133,7 +137,7 @@ function pillText(params: { key: KeyView | null; bpm: BpmView | null }): string 
   return `${params.bpm?.label ?? EMPTY} · ${keyLabel}`;
 }
 
-export function overlayView(state: TabState): OverlayView {
+export function overlayView(state: SessionState): OverlayView {
   const estimates = state.window?.recentEstimates ?? [];
   const estimate = latestEstimate(state.window);
   const key = estimate ? keyView({ estimate, isLocked: isKeyLocked(estimates) }) : null;

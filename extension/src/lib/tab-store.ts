@@ -1,23 +1,23 @@
 import { browser } from 'wxt/browser';
-import { createTabState, type TabState } from './tab-state';
+import { createSessionState, type SessionState } from '@hunch/ui';
 
-const pendingUpdates = new Map<number, Promise<TabState>>();
+const pendingUpdates = new Map<number, Promise<SessionState>>();
 
 function storageKey(tabId: number): string {
   return `tabState:${String(tabId)}`;
 }
 
-export async function getTabState(tabId: number): Promise<TabState | null> {
+export async function getTabState(tabId: number): Promise<SessionState | null> {
   const key = storageKey(tabId);
   const stored = await browser.storage.session.get(key);
-  return (stored[key] as TabState | undefined) ?? null;
+  return (stored[key] as SessionState | undefined) ?? null;
 }
 
 async function applyUpdate(params: {
   tabId: number;
-  update: (state: TabState) => TabState;
-}): Promise<TabState> {
-  const current = (await getTabState(params.tabId)) ?? createTabState(params.tabId);
+  update: (state: SessionState) => SessionState;
+}): Promise<SessionState> {
+  const current = (await getTabState(params.tabId)) ?? createSessionState(params.tabId);
   const next = params.update(current);
   await browser.storage.session.set({ [storageKey(params.tabId)]: next });
   return next;
@@ -29,8 +29,8 @@ async function applyUpdate(params: {
  */
 export function updateTabState(params: {
   tabId: number;
-  update: (state: TabState) => TabState;
-}): Promise<TabState> {
+  update: (state: SessionState) => SessionState;
+}): Promise<SessionState> {
   const previous = pendingUpdates.get(params.tabId) ?? Promise.resolve(null);
   const next = previous.catch(() => null).then(() => applyUpdate(params));
   pendingUpdates.set(params.tabId, next);

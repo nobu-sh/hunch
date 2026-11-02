@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import type { Estimate, SessionEvent } from './messages';
+import type { Estimate, SessionEvent } from './estimate';
 import {
   HISTORY_LIMIT,
   RECENT_ESTIMATES_LIMIT,
   applySessionEvent,
-  createTabState,
+  createSessionState,
   latestEstimate,
-  type TabState,
-} from './tab-state';
+  type SessionState,
+} from './session-state';
 
 const TAB_ID = 7;
 const NOW = 1_000_000;
@@ -25,7 +25,7 @@ function estimate(overrides: Partial<Estimate> = {}): Estimate {
   };
 }
 
-function apply(state: TabState, ...events: SessionEvent[]): TabState {
+function apply(state: SessionState, ...events: SessionEvent[]): SessionState {
   return events.reduce((next, event) => applySessionEvent({ state: next, event, now: NOW }), state);
 }
 
@@ -49,7 +49,7 @@ const ended = (
 
 describe('applySessionEvent', () => {
   it('opens a window stamped with the current time', () => {
-    const state = apply(createTabState(TAB_ID), started(1));
+    const state = apply(createSessionState(TAB_ID), started(1));
 
     expect(state.window).toEqual({
       windowId: 1,
@@ -67,14 +67,14 @@ describe('applySessionEvent', () => {
       estimate: value,
     }));
 
-    const state = apply(createTabState(TAB_ID), started(1), ...events);
+    const state = apply(createSessionState(TAB_ID), started(1), ...events);
 
     expect(state.window?.recentEstimates).toHaveLength(RECENT_ESTIMATES_LIMIT);
     expect(latestEstimate(state.window)?.bpm).toBe(143);
   });
 
   it('ignores estimates for a window that is not current', () => {
-    const state = apply(createTabState(TAB_ID), started(2), {
+    const state = apply(createSessionState(TAB_ID), started(2), {
       type: 'estimate',
       windowId: 1,
       estimate: estimate(),
@@ -86,7 +86,7 @@ describe('applySessionEvent', () => {
   it('marks an ended window, keeps its final estimate, and records it in history', () => {
     const final = estimate({ bpm: 150 });
 
-    const state = apply(createTabState(TAB_ID), started(1), ended(1, { estimate: final }));
+    const state = apply(createSessionState(TAB_ID), started(1), ended(1, { estimate: final }));
 
     expect(state.window?.hasEnded).toBe(true);
     expect(latestEstimate(state.window)).toEqual(final);
@@ -96,14 +96,14 @@ describe('applySessionEvent', () => {
   });
 
   it('drops a window that was too short, without a history entry', () => {
-    const state = apply(createTabState(TAB_ID), started(1), ended(1, { tooShort: true }));
+    const state = apply(createSessionState(TAB_ID), started(1), ended(1, { tooShort: true }));
 
     expect(state.window).toBeNull();
     expect(state.history).toEqual([]);
   });
 
   it('records a window that ended without any estimate', () => {
-    const state = apply(createTabState(TAB_ID), started(1), ended(1, { estimate: null }));
+    const state = apply(createSessionState(TAB_ID), started(1), ended(1, { estimate: null }));
 
     expect(state.window?.recentEstimates).toEqual([]);
     expect(state.history[0]?.estimate).toBeNull();
@@ -115,14 +115,14 @@ describe('applySessionEvent', () => {
       ended(index + 1),
     ]).flat();
 
-    const state = apply(createTabState(TAB_ID), ...events);
+    const state = apply(createSessionState(TAB_ID), ...events);
 
     expect(state.history).toHaveLength(HISTORY_LIMIT);
     expect(state.history[0]?.windowId).toBe(HISTORY_LIMIT + 2);
   });
 
   it('replaces an ended window when the next one starts', () => {
-    const state = apply(createTabState(TAB_ID), started(1), ended(1), started(2));
+    const state = apply(createSessionState(TAB_ID), started(1), ended(1), started(2));
 
     expect(state.window?.windowId).toBe(2);
     expect(state.window?.hasEnded).toBe(false);

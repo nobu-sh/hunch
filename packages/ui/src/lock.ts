@@ -1,4 +1,4 @@
-import type { Estimate } from './messages';
+import type { Estimate } from './estimate';
 import { parseKey, scaleId } from './music';
 
 // Picked on validation timelines (`hunch-eval timeline`), with estimates every 0.5 s.

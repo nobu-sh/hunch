@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Estimate } from './messages';
+import type { Estimate } from './estimate';
 import { estimateCopyText, formatBpmAlternate, formatTuning, overlayView } from './overlay-view';
-import { createTabState, type TabState } from './tab-state';
+import { createSessionState, type SessionState } from './session-state';
 
 const TAB_ID = 4;
 
@@ -18,9 +18,9 @@ function estimate(overrides: Partial<Estimate> = {}): Estimate {
   };
 }
 
-function withWindow(params: { estimates: Estimate[]; hasEnded?: boolean }): TabState {
+function withWindow(params: { estimates: Estimate[]; hasEnded?: boolean }): SessionState {
   return {
-    ...createTabState(TAB_ID),
+    ...createSessionState(TAB_ID),
     window: {
       windowId: 1,
       startedAt: 0,
@@ -32,7 +32,7 @@ function withWindow(params: { estimates: Estimate[]; hasEnded?: boolean }): TabS
 
 describe('overlayView status', () => {
   it('is listening before any window', () => {
-    const view = overlayView(createTabState(TAB_ID));
+    const view = overlayView(createSessionState(TAB_ID));
 
     expect(view.status).toBe('listening…');
     expect(view.key).toBeNull();
@@ -107,8 +107,8 @@ describe('overlayView values', () => {
 
   it('lists history rows with copyable text', () => {
     const endedAt = new Date(2026, 9, 23, 9, 5).getTime();
-    const state: TabState = {
-      ...createTabState(TAB_ID),
+    const state: SessionState = {
+      ...createSessionState(TAB_ID),
       history: [{ windowId: 1, endedAt, durationSeconds: 30, estimate: estimate() }],
     };
 
