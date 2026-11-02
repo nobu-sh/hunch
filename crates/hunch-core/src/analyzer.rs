@@ -26,6 +26,8 @@ pub struct Analyzer {
     samples_per_estimate: u64,
     total_samples: u64,
     samples_since_estimate: u64,
+    /// The key the last emitted estimate showed, which the key detector holds on close calls.
+    shown_key: Option<Key>,
 }
 
 impl Analyzer {
@@ -39,6 +41,7 @@ impl Analyzer {
             samples_per_estimate: ((sample_rate as f32 * ESTIMATE_INTERVAL_SECONDS) as u64).max(1),
             total_samples: 0,
             samples_since_estimate: 0,
+            shown_key: None,
         }
     }
 
@@ -55,7 +58,9 @@ impl Analyzer {
             return None;
         }
         self.samples_since_estimate %= self.samples_per_estimate;
-        Some(self.estimate())
+        let estimate = self.estimate();
+        self.shown_key = estimate.key;
+        Some(estimate)
     }
 
     pub fn reset(&mut self) {
@@ -63,6 +68,7 @@ impl Analyzer {
         self.tempo.reset();
         self.total_samples = 0;
         self.samples_since_estimate = 0;
+        self.shown_key = None;
     }
 
     /// How many more samples `push` needs before it returns the next estimate.
@@ -76,7 +82,7 @@ impl Analyzer {
     }
 
     fn estimate(&self) -> Estimate {
-        let key = self.key.estimate();
+        let key = self.key.estimate_holding(self.shown_key);
         let tempo = self.tempo.estimate();
         Estimate {
             key: key.key,

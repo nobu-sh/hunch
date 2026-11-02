@@ -88,6 +88,35 @@ pub(super) struct KeyRanking {
     pub best_score: f32,
     /// Best correlation among keys that are neither `best` nor its relative.
     pub rival_score: f32,
+    /// Every key's score, laid out as in `key_at`.
+    scores: [f32; KEY_COUNT],
+}
+
+impl KeyRanking {
+    fn with_best(scores: [f32; KEY_COUNT], best_index: usize) -> Self {
+        let best = key_at(best_index);
+        let relative = relative_key(best);
+        let rival_score = (0..KEY_COUNT)
+            .filter(|&index| index != best_index && key_at(index) != relative)
+            .map(|index| scores[index])
+            .fold(f32::NEG_INFINITY, f32::max);
+        Self {
+            best,
+            best_score: scores[best_index],
+            rival_score,
+            scores,
+        }
+    }
+
+    /// Ranks `held` first instead while the best key beats it by at most `margin`, so the shown
+    /// key doesn't flip on close calls.
+    pub fn holding(self, held: Key, margin: f32) -> Self {
+        let held_index = index_of(held);
+        if self.best_score - self.scores[held_index] > margin {
+            return self;
+        }
+        Self::with_best(self.scores, held_index)
+    }
 }
 
 /// How keys are scored against a chroma.
@@ -117,18 +146,7 @@ pub(super) fn rank_keys(chroma: &[f32; PITCH_CLASSES], scoring: KeyScoring) -> O
     }
 
     let best_index = (0..KEY_COUNT).max_by(|&a, &b| scores[a].total_cmp(&scores[b]))?;
-    let best = key_at(best_index);
-    let relative = relative_key(best);
-    let rival_score = (0..KEY_COUNT)
-        .filter(|&index| index != best_index && key_at(index) != relative)
-        .map(|index| scores[index])
-        .fold(f32::NEG_INFINITY, f32::max);
-    let best_score = scores[best_index];
-    Some(KeyRanking {
-        best,
-        best_score,
-        rival_score,
-    })
+    Some(KeyRanking::with_best(scores, best_index))
 }
 
 /// The key with the same notes and the other mode (C major ↔ A minor).
@@ -144,6 +162,14 @@ pub(super) fn relative_key(key: Key) -> Key {
 /// Inverse of the score layout in `rank_keys`: majors first, then minors, by tonic.
 fn key_at(index: usize) -> Key {
     key(index % PITCH_CLASSES, MODES[index / PITCH_CLASSES])
+}
+
+fn index_of(key: Key) -> usize {
+    let mode_index = MODES
+        .iter()
+        .position(|&mode| mode == key.mode)
+        .expect("MODES lists every mode");
+    mode_index * PITCH_CLASSES + usize::from(key.tonic.index())
 }
 
 fn key(tonic: usize, mode: Mode) -> Key {
@@ -228,6 +254,37 @@ mod tests {
             };
             let ranking = rank_keys(&white_keys, scoring).expect("not flat");
             assert_eq!(ranking.best, expected, "bass on {bass_note}");
+        }
+    }
+
+    #[test]
+    fn holding_keeps_a_close_runner_up() {
+        let a_minor = rotated(KeyProfile::Edma.template(Mode::Minor), 9);
+        let scoring = KeyScoring {
+            profile: KeyProfile::Edma,
+            tonic_cue: [0.0; PITCH_CLASSES],
+            tonic_weight: 0.0,
+        };
+        let ranking = rank_keys(&a_minor, scoring).expect("not flat");
+        let runner_up = key(4, Mode::Minor);
+        let runner_up_score = ranking.scores[index_of(runner_up)];
+        let gap = ranking.best_score - runner_up_score;
+
+        let held = ranking.holding(runner_up, gap + 0.01);
+        assert_eq!(held.best, runner_up);
+        assert_eq!(held.best_score, runner_up_score);
+        assert!(
+            held.rival_score > held.best_score,
+            "the real best is now the rival"
+        );
+
+        assert_eq!(ranking.holding(runner_up, gap - 0.01), ranking);
+    }
+
+    #[test]
+    fn key_indices_round_trip() {
+        for index in 0..KEY_COUNT {
+            assert_eq!(index_of(key_at(index)), index);
         }
     }
 
