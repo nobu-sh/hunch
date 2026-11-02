@@ -1,3 +1,5 @@
+import { ToggleIconButton } from './ToggleIconButton';
+
 export interface SourcesButtonProps {
   /** Whether the picker it opens is showing. */
   isOpen: boolean;
@@ -7,13 +9,12 @@ export interface SourcesButtonProps {
 /** A header button for the source picker: a speaker glyph. */
 export function SourcesButton({ isOpen, onClick }: SourcesButtonProps) {
   return (
-    <button
-      className="icon"
-      data-ref="sources"
+    <ToggleIconButton
+      isOn={isOpen}
+      onToggle={onClick}
+      label="Sources"
       title="Choose what to listen to"
-      aria-label="Sources"
-      aria-pressed={isOpen}
-      onClick={onClick}
+      dataRef="sources"
     >
       <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
         <path d="M2 6h3l4-3v10l-4-3H2z" fill="currentColor" />
@@ -25,6 +26,6 @@ export function SourcesButton({ isOpen, onClick }: SourcesButtonProps) {
           strokeLinecap="round"
         />
       </svg>
-    </button>
+    </ToggleIconButton>
   );
 }
