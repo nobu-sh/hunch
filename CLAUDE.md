@@ -9,7 +9,7 @@ Detects the key and BPM of audio as it plays. A Rust analysis core runs natively
 - `crates/hunch-capture`: audio capture for the desktop app. It has a platform-independent `AudioBackend` trait and source model, converts audio to mono 22,050 Hz chunks, and has a WASAPI backend in `platform/windows` (other platforms get a stub). Its CLI lists sources and prints live session events: `cargo run -p hunch-capture --release -- list`, then `listen <id> [--seconds n]`.
 - `crates/hunch-eval`: native CLI that scores the core against datasets in `data/` (gitignored). Run `cargo run -p hunch-eval --release -- --help`.
 - `extension/`: WXT + TypeScript. Its build commands run from `extension/`. `extension/dev/` holds the dev-only Hunch browser mixins and the test-beat page.
-- `apps/desktop`: the Tauri 2 desktop app (Windows first). `src-tauri/` is the Rust backend, a workspace crate that runs a `hunch-core` `Session` from an `AudioFeed` and emits each event as a `session-event` Tauri event; for now the feed is a synthesized test beat (120 BPM, A minor). `src/` is the React UI built from `@hunch/ui`; `dev/` holds its browser mixin and dev script.
+- `apps/desktop`: the Tauri 2 desktop app (Windows first). `src-tauri/` is the Rust backend, a workspace crate that runs a `hunch-core` `Session` from an `AudioFeed` (real capture through `hunch-capture`, or the synthesized test beat) and emits each event as a `session-event` Tauri event. `src/` is the React UI built from `@hunch/ui`; `dev/` holds its browser mixin and dev script.
 - `packages/ui` (`@hunch/ui`): shared UI logic and components.
 - `packages/browser` (`@hunch/browser`): a generic dev browser for agents, with no Hunch knowledge. It handles Chrome for Testing, launching or attaching, unpacked extensions, the DevTools endpoint file, console output and mixins. TypeScript that Node runs directly by stripping types: no build step.
 - The repo root is a pnpm workspace (`apps/*`, `extension`, `packages/*`) with one lockfile. Run `pnpm install` from the root.
@@ -37,7 +37,9 @@ pnpm browser:desktop  # with desktop:dev running: attach to the app's page and p
 ```
 
 - The window is the overlay: transparent, undecorated, and resized to the panel or pill. Drag the header or pill to move it; close quits.
-- The UI subscribes to `session-event`, then calls the `listen` command, which starts a fresh session so no event is missed.
+- The UI subscribes to `session-event` and `source-status`, then calls the `listen` command, which starts a fresh session so no event is missed. `listen` starts the remembered source (`remembered-source.json` in the app data dir) if it still exists, else the default output device's loopback.
+- Commands: `list_sources` (`{ sources, listsApps }`), `select_source { id }` (fresh session on that source, remembered), `current_source`, `listen`. `source-status` is `{ sourceId, state: listening | ended | silent | failed, message }`; `silent` means an app or output device gave only digital silence for 15 s.
+- Debug builds list a dev source, `dev:test-beat` (120 BPM, A minor, synthesized). `HUNCH_DEV_SOURCE=test-beat pnpm desktop:dev` makes `listen` start it.
 - Tauri is pinned to 2.11 (crate and npm) because 2.12 needs rustc 1.90.
 
 ## Running the extension in a browser
