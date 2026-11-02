@@ -1,0 +1,103 @@
+name: Release
+
+# Builds the extension zip and the Windows installer at the shared version and uploads both as workflow artifacts.
+# Pull requests that change this workflow or the release scripts run it too, since workflow_dispatch only works once it is on master.
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    paths: ['.github/workflows/release.yml', 'packages/release/**']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Must match the wasm-bindgen version pinned in crates/hunch-wasm/Cargo.toml.
+  WASM_BINDGEN_VERSION: 0.2.108
+  NODE_VERSION: 26
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      # The version, plus +<short sha> unless this run is for a tag: e.g. 0.1.0 or 0.1.0+abc1234.
+      label: ${{ steps.label.outputs.label }}
+    steps:
+      - uses: actions/checkout@v7
+      # The check needs only Node, so this job skips pnpm and the install.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Check versions
+        if: github.ref_type != 'tag'
+        run: node packages/release/src/cli.ts check
+      - name: Check versions and tag
+        if: github.ref_type == 'tag'
+        run: node packages/release/src/cli.ts check --tag "$GITHUB_REF_NAME"
+      - id: label
+        env:
+          IS_TAG: ${{ github.ref_type == 'tag' }}
+          # A pull request's GITHUB_SHA is its merge commit, so name the head commit instead.
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "$IS_TAG" = true ]; then
+            echo "label=$version" >> "$GITHUB_OUTPUT"
+          else
+            echo "label=$version+${COMMIT_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+  extension:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ env.WASM_BINDGEN_VERSION }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:wasm
+        working-directory: extension
+      # Builds the extension, then writes .output/hunch-extension-<version>-chrome.zip.
+      - run: pnpm zip
+        working-directory: extension
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hunch-extension-${{ needs.version.outputs.label }}
+          path: extension/.output/*-chrome.zip
+          if-no-files-found: error
+
+  desktop:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm desktop:build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hunch-desktop-${{ needs.version.outputs.label }}
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
