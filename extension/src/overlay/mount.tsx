@@ -1,5 +1,9 @@
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
 import { browser } from 'wxt/browser';
-import { overlayView, type SessionState } from '@hunch/ui';
+import { overlayView, type OverlayView, type SessionState } from '@hunch/ui';
+import { Overlay } from '@hunch/ui/components';
+import OVERLAY_CSS from '@hunch/ui/overlay.css?inline';
 import {
   isOverlayMessage,
   type OverlayCloseRequest,
@@ -14,9 +18,7 @@ import {
   type Size,
 } from '@/lib/overlay-position';
 import { makeDraggable } from './drag';
-import { createPanel, type Panel } from './panel';
 import { loadOverlayPrefs, saveCollapsed, savePosition } from './prefs';
-import { OVERLAY_CSS } from './styles';
 
 const HOST_TAG = 'hunch-overlay';
 const TOP_Z_INDEX = '2147483647';
@@ -55,13 +57,12 @@ function placeHost(params: { host: HTMLElement; point: Point }): void {
   params.host.style.setProperty('visibility', 'visible', 'important');
 }
 
-function wireLayout(params: {
-  host: HTMLElement;
-  panel: Panel;
-  position: OverlayPosition;
-  isCollapsed: boolean;
-}): { applyPosition: () => void; dispose: () => void } {
-  const { host, panel } = params;
+function wireLayout(params: { host: HTMLElement; position: OverlayPosition }): {
+  applyPosition: () => void;
+  dragHandle: (handle: HTMLElement | null) => (() => void) | undefined;
+  dispose: () => void;
+} {
+  const { host } = params;
   let position = params.position;
 
   const applyPosition = (): void => {
@@ -85,31 +86,15 @@ function wireLayout(params: {
     });
     void savePosition(position);
   };
-  const setCollapsed = (isCollapsed: boolean): void => {
-    panel.setCollapsed(isCollapsed);
-    // Re-anchors to the same corner, so the pill and panel share it.
-    applyPosition();
-    void saveCollapsed(isCollapsed);
-  };
+  // A React ref callback: React calls the returned cleanup when the handle unmounts.
+  const dragHandle = (handle: HTMLElement | null): (() => void) | undefined =>
+    handle === null ? undefined : makeDraggable({ handle, target: host, onMove, onDrop });
 
-  panel.setCollapsed(params.isCollapsed);
-  makeDraggable({ handle: panel.header, target: host, onMove, onDrop });
-  makeDraggable({
-    handle: panel.pill,
-    target: host,
-    onMove,
-    onDrop,
-    onClick: () => {
-      setCollapsed(false);
-    },
-  });
-  panel.collapseButton.addEventListener('click', () => {
-    setCollapsed(true);
-  });
   window.addEventListener('resize', applyPosition);
 
   return {
     applyPosition,
+    dragHandle,
     dispose: () => {
       window.removeEventListener('resize', applyPosition);
     },
@@ -121,6 +106,15 @@ async function requestState(): Promise<SessionState | null> {
   return browser.runtime.sendMessage<OverlayHelloRequest, SessionState | null>(request);
 }
 
+function requestClose(): void {
+  const request: OverlayCloseRequest = { type: 'overlay-close' };
+  void browser.runtime.sendMessage(request);
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  await navigator.clipboard.writeText(text);
+}
+
 /** Mounts the overlay once per document and keeps it in sync with the background. */
 export async function mountOverlay(): Promise<void> {
   const isMounted = document.documentElement.querySelector(`:scope > ${HOST_TAG}`) !== null;
@@ -128,23 +122,56 @@ export async function mountOverlay(): Promise<void> {
 
   const host = createHost();
   const shadow = host.attachShadow({ mode: 'closed' });
-  const style = document.createElement('style');
-  style.textContent = OVERLAY_CSS;
-  const panel = createPanel();
-  shadow.append(style, panel.root);
+  const reactRoot = createRoot(shadow);
   // On <html>, not <body>: some sites swap out the body on navigation.
   document.documentElement.append(host);
 
   const prefs = await loadOverlayPrefs();
-  const layout = wireLayout({ host, panel, ...prefs });
+  const layout = wireLayout({ host, position: prefs.position });
+  let isCollapsed = prefs.isCollapsed;
+  let view: OverlayView | null = null;
 
-  const render = (state: SessionState): void => {
-    panel.render(overlayView(state));
+  // Synchronous, so the host is measured and placed against the DOM just rendered.
+  const draw = (): void => {
+    if (view === null) return;
+    const currentView = view;
+    flushSync(() => {
+      reactRoot.render(
+        <>
+          <style>{OVERLAY_CSS}</style>
+          <Overlay
+            view={currentView}
+            isCollapsed={isCollapsed}
+            onCollapse={() => {
+              setCollapsed(true);
+            }}
+            onExpand={() => {
+              setCollapsed(false);
+            }}
+            onClose={requestClose}
+            onCopy={copyToClipboard}
+            headerRef={layout.dragHandle}
+            pillRef={layout.dragHandle}
+          />
+        </>,
+      );
+    });
     layout.applyPosition();
+  };
+  // Re-anchors to the same corner on the redraw, so the pill and panel share it.
+  function setCollapsed(nextIsCollapsed: boolean): void {
+    isCollapsed = nextIsCollapsed;
+    draw();
+    void saveCollapsed(isCollapsed);
+  }
+  const render = (state: SessionState): void => {
+    view = overlayView(state);
+    draw();
   };
   const unmount = (): void => {
     browser.runtime.onMessage.removeListener(onMessage);
     layout.dispose();
+    reactRoot.unmount();
     host.remove();
   };
   function onMessage(message: unknown): undefined {
@@ -153,10 +180,6 @@ export async function mountOverlay(): Promise<void> {
     else render(message.state);
   }
 
-  panel.closeButton.addEventListener('click', () => {
-    const request: OverlayCloseRequest = { type: 'overlay-close' };
-    void browser.runtime.sendMessage(request);
-  });
   browser.runtime.onMessage.addListener(onMessage);
 
   const state = await requestState();
