@@ -5,8 +5,20 @@ body {
   background: transparent;
   overflow: hidden;
 }
+/* Pinned to the window's anchored corner, so a resize grows and shrinks from that corner. */
 #app {
   display: inline-block;
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+:root[data-corner$='right'] #app {
+  left: auto;
+  right: 0;
+}
+:root[data-corner^='bottom'] #app {
+  top: auto;
+  bottom: 0;
 }
 
 /*

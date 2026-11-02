@@ -1,5 +1,5 @@
-// The overlay is the whole window: it sizes the window, drags it and closes it.
-import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
+// The overlay is the whole window: it drags the window and closes it. `placement.ts` sizes it.
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 /** How far a press moves before it's a drag rather than a click. */
 const DRAG_THRESHOLD_PX = 4;
@@ -8,21 +8,6 @@ const PRIMARY_BUTTON = 0;
 function reportFailure(action: string) {
   return (error: unknown) => {
     console.error(`Hunch couldn't ${action} the window:`, error);
-  };
-}
-
-/** Keeps the window the size of `element`. Returns the cleanup. */
-export function fitWindowTo(element: HTMLElement): () => void {
-  const observer = new ResizeObserver(() => {
-    const { width, height } = element.getBoundingClientRect();
-    if (width === 0 || height === 0) return;
-    getCurrentWindow()
-      .setSize(new LogicalSize(Math.ceil(width), Math.ceil(height)))
-      .catch(reportFailure('resize'));
-  });
-  observer.observe(element);
-  return () => {
-    observer.disconnect();
   };
 }
 

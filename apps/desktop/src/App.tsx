@@ -13,15 +13,18 @@ import {
 import {
   Notice,
   Overlay,
+  PinButton,
   SourcePicker,
   SourcesButton,
   useSourcePicker,
   type CloseLabels,
 } from '@hunch/ui/components';
 import { backend } from './backend';
+import { anchorWindowTo } from './placement';
 import { followSession } from './session';
+import { useAlwaysOnTop } from './use-always-on-top';
 import { useSubscription } from './use-subscription';
-import { closeWindow, dragWindowFrom, fitWindowTo } from './window';
+import { closeWindow, dragWindowFrom } from './window';
 
 /** The app listens to one source at a time, so its session needs no real id yet. */
 const SESSION_ID = 0;
@@ -59,10 +62,11 @@ export function App() {
     setState((current) => applySourceStatus({ state: current, sourceState: next.state }));
   };
   useSubscription({ subscribe: () => backend.onSourceStatus(followStatus), onError: showError });
+  const alwaysOnTop = useAlwaysOnTop(showError);
 
   useEffect(() => {
     if (rootRef.current === null) return;
-    return fitWindowTo(rootRef.current);
+    return anchorWindowTo(rootRef.current);
   }, []);
 
   const statusSource = picker.current?.id === status?.sourceId ? picker.current : null;
@@ -85,10 +89,13 @@ export function App() {
         headerRef={dragWindowFrom}
         pillRef={dragWindowFrom}
         headerActions={
-          <SourcesButton
-            isOpen={picker.isOpen}
-            onClick={picker.isOpen ? picker.close : picker.open}
-          />
+          <>
+            <PinButton isPinned={alwaysOnTop.isOnTop} onToggle={alwaysOnTop.setOnTop} />
+            <SourcesButton
+              isOpen={picker.isOpen}
+              onClick={picker.isOpen ? picker.close : picker.open}
+            />
+          </>
         }
         notice={
           notice && (
