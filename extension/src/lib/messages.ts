@@ -1,28 +1,4 @@
-import type { TabState } from './tab-state';
-
-/** Mirrors the `Estimate` object returned by `Analyzer.push` and `Session.push` in crates/hunch-wasm. */
-export interface Estimate {
-  key: string | null;
-  keyConfidence: number;
-  bpm: number | null;
-  bpmConfidence: number;
-  bpmAlternate: number | null;
-  /** Deviation from A=440 in cents; null when there is no key. */
-  tuningCents: number | null;
-  secondsAnalyzed: number;
-}
-
-/** Mirrors `SessionEvent` from crates/hunch-wasm. Timings are seconds of audio, not wall clock. */
-export type SessionEvent =
-  | { type: 'windowStarted'; windowId: number; atSeconds: number }
-  | { type: 'estimate'; windowId: number; estimate: Estimate }
-  | {
-      type: 'windowEnded';
-      windowId: number;
-      estimate: Estimate | null;
-      durationSeconds: number;
-      tooShort: boolean;
-    };
+import type { Estimate, SessionEvent, SessionState } from '@hunch/ui';
 
 /** Background → offscreen document. `target` keeps other extension pages from answering. */
 export interface OffscreenPingRequest {
@@ -105,7 +81,7 @@ export function isBackgroundMessage(message: unknown): message is BackgroundMess
 export interface OverlayStateMessage {
   target: 'overlay';
   type: 'state';
-  state: TabState;
+  state: SessionState;
 }
 
 /** Background → overlay content script when Hunch is turned off for the tab. */
@@ -116,7 +92,7 @@ export interface OverlayUnmountMessage {
 
 export type OverlayMessage = OverlayStateMessage | OverlayUnmountMessage;
 
-/** Overlay → background on mount. Replies with the tab's `TabState`, or null when it's off. */
+/** Overlay → background on mount. Replies with the tab's `SessionState`, or null when it's off. */
 export interface OverlayHelloRequest {
   type: 'overlay-hello';
 }

@@ -1,7 +1,7 @@
 // Stand-in types for src/wasm/pkg before `pnpm build:wasm` has generated it. tsconfig `paths`
 // tries the real package first, so these only apply while it's missing. Keep in sync with
 // crates/hunch-wasm.
-import type { Estimate, SessionEvent } from '@/lib/messages';
+import type { Estimate, SessionEvent } from '@hunch/ui';
 
 export interface InitInput {
   module_or_path?: string | URL | Request | Response | BufferSource | WebAssembly.Module;

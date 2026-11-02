@@ -1,5 +1,6 @@
 import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
+import { applySessionEvent, createSessionState, withError, type SessionState } from '@hunch/ui';
 import { badgeText } from '@/lib/badge';
 import {
   isBackgroundMessage,
@@ -14,7 +15,6 @@ import {
   sendOffscreenRequest,
 } from '@/lib/offscreen';
 import { injectOverlay, sendToOverlay } from '@/lib/overlay-injection';
-import { applySessionEvent, createTabState, withError, type TabState } from '@/lib/tab-state';
 import { clearTabState, getTabState, updateTabState } from '@/lib/tab-store';
 import { getEnabledTabs, removeTab, toggleTab } from '@/lib/tab-toggle';
 
@@ -35,7 +35,7 @@ async function closeOffscreenIfIdle(): Promise<void> {
   await closeOffscreenDocument();
 }
 
-async function publishTabState(state: TabState): Promise<void> {
+async function publishTabState(state: SessionState): Promise<void> {
   const { tabId } = state;
   await Promise.all([
     browser.action.setBadgeText({ tabId, text: badgeText(state) }),
@@ -45,7 +45,7 @@ async function publishTabState(state: TabState): Promise<void> {
 
 async function updateAndPublish(params: {
   tabId: number;
-  update: (state: TabState) => TabState;
+  update: (state: SessionState) => SessionState;
 }): Promise<void> {
   const state = await updateTabState(params);
   await publishTabState(state);
@@ -61,7 +61,7 @@ async function reportTabError(params: { tabId: number; error: unknown }): Promis
 async function enableTab(params: { tabId: number; streamId: Promise<string> }): Promise<void> {
   const { tabId } = params;
   // Starts fresh, so a late event from a previous session can't leak into this one.
-  await updateAndPublish({ tabId, update: () => createTabState(tabId) });
+  await updateAndPublish({ tabId, update: () => createSessionState(tabId) });
   await injectOverlay(tabId);
   try {
     const streamId = await params.streamId;
@@ -105,7 +105,7 @@ async function handleOverlayClose(tabId: number): Promise<void> {
   await teardownTab(tabId);
 }
 
-async function getOverlayState(tabId: number): Promise<TabState | null> {
+async function getOverlayState(tabId: number): Promise<SessionState | null> {
   if (!(await isTabEnabled(tabId))) return null;
   return getTabState(tabId);
 }

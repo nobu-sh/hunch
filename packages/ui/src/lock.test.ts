@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isBpmLocked, isKeyLocked } from './lock';
-import type { Estimate } from './messages';
+import type { Estimate } from './estimate';
 
 function estimate(overrides: Partial<Estimate> = {}): Estimate {
   return {

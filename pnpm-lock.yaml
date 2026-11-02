@@ -9,6 +9,10 @@ importers:
   .: {}
 
   extension:
+    dependencies:
+      '@hunch/ui':
+        specifier: workspace:*
+        version: link:../packages/ui
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -40,6 +44,30 @@ importers:
       wxt:
         specifier: ^0.21.4
         version: 0.21.4(eslint@10.13.0(jiti@2.7.0))(rolldown@1.2.15)(typescript@6.0.3)(vite@8.3.5(jiti@2.7.0))
+
+  packages/ui:
+    devDependencies:
+      '@eslint/js':
+        specifier: ^10.0.1
+        version: 10.0.1(eslint@10.13.0(jiti@2.7.0))
+      eslint:
+        specifier: ^10.13.0
+        version: 10.13.0(jiti@2.7.0)
+      globals:
+        specifier: ^17.13.0
+        version: 17.13.0
+      prettier:
+        specifier: ^3.9.10
+        version: 3.9.10
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      typescript-eslint:
+        specifier: ^8.72.0
+        version: 8.72.0(eslint@10.13.0(jiti@2.7.0))(typescript@6.0.3)
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(vite@8.3.5(jiti@2.7.0))
 
 packages:
 

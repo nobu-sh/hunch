@@ -19,6 +19,9 @@
     "browser:install": "node scripts/browser/chrome.mjs",
     "browser:check": "node scripts/browser/run.mjs --check"
   },
+  "dependencies": {
+    "@hunch/ui": "workspace:*"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@puppeteer/browsers": "^3.2.6",

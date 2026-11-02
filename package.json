@@ -4,6 +4,7 @@
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "lint": "pnpm -r lint",
+    "format": "pnpm -r format",
     "format:check": "pnpm -r format:check",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"

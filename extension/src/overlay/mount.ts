@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { overlayView, type SessionState } from '@hunch/ui';
 import {
   isOverlayMessage,
   type OverlayCloseRequest,
@@ -12,8 +13,6 @@ import {
   type Point,
   type Size,
 } from '@/lib/overlay-position';
-import { overlayView } from '@/lib/overlay-view';
-import type { TabState } from '@/lib/tab-state';
 import { makeDraggable } from './drag';
 import { createPanel, type Panel } from './panel';
 import { loadOverlayPrefs, saveCollapsed, savePosition } from './prefs';
@@ -117,9 +116,9 @@ function wireLayout(params: {
   };
 }
 
-async function requestState(): Promise<TabState | null> {
+async function requestState(): Promise<SessionState | null> {
   const request: OverlayHelloRequest = { type: 'overlay-hello' };
-  return browser.runtime.sendMessage<OverlayHelloRequest, TabState | null>(request);
+  return browser.runtime.sendMessage<OverlayHelloRequest, SessionState | null>(request);
 }
 
 /** Mounts the overlay once per document and keeps it in sync with the background. */
@@ -139,7 +138,7 @@ export async function mountOverlay(): Promise<void> {
   const prefs = await loadOverlayPrefs();
   const layout = wireLayout({ host, panel, ...prefs });
 
-  const render = (state: TabState): void => {
+  const render = (state: SessionState): void => {
     panel.render(overlayView(state));
     layout.applyPosition();
   };
