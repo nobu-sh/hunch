@@ -1,25 +1,21 @@
 // The backend's session events, folded into the shared session state.
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { applySessionEvent, type SessionEvent, type SessionState } from '@hunch/ui';
-
-/** Must match `SESSION_EVENT` in src-tauri/src/listener.rs. */
-const SESSION_EVENT = 'session-event';
-/** The backend command that starts a fresh session. */
-const LISTEN_COMMAND = 'listen';
+import { applySessionEvent, type SessionState } from '@hunch/ui';
+import type { Backend } from './backend';
 
 /**
  * Subscribes, then asks the backend to start listening, so no event is missed. Resolves to the
  * unsubscribe function.
  */
-export async function followSession(
-  onChange: (update: (state: SessionState) => SessionState) => void,
-): Promise<() => void> {
-  const unlisten = await listen<SessionEvent>(SESSION_EVENT, ({ payload }) => {
-    onChange((state) => applySessionEvent({ state, event: payload, now: Date.now() }));
+export async function followSession(params: {
+  backend: Backend;
+  onChange: (update: (state: SessionState) => SessionState) => void;
+}): Promise<() => void> {
+  const { backend, onChange } = params;
+  const unlisten = await backend.onSessionEvent((event) => {
+    onChange((state) => applySessionEvent({ state, event, now: Date.now() }));
   });
   try {
-    await invoke(LISTEN_COMMAND);
+    await backend.listen();
   } catch (error) {
     unlisten();
     throw error;
