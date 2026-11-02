@@ -1,0 +1,40 @@
+name: Desktop release
+
+# Builds the Windows installer and uploads it as a workflow artifact.
+# Pull requests that change this workflow run it too, since workflow_dispatch only works once it is on master.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+  pull_request:
+    paths: ['.github/workflows/desktop-release.yml']
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: 26
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm desktop:build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hunch-windows-installer
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
