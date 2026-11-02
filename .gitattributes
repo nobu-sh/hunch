@@ -1,0 +1,7 @@
+# Store text with LF and check it out with LF on every OS, whatever the editor or tool wrote.
+* text=auto eol=lf
+
+# Binary: never normalize or diff as text.
+*.png binary
+*.ico binary
+*.wasm binary
