@@ -18,6 +18,7 @@ function Harness(props: { client: SourceClient; onSwitch?: (id: string) => void 
   return (
     <>
       <button onClick={picker.open}>Open</button>
+      <button onClick={picker.refreshCurrent}>Refresh</button>
       <output>{picker.current?.name ?? 'none'}</output>
       {picker.isOpen && <SourcePicker {...picker.pickerProps} />}
     </>
@@ -38,6 +39,21 @@ describe('useSourcePicker', () => {
 
     expect(
       await screen.findByText(SPEAKERS_SOURCE.name, { selector: 'output' }),
+    ).toBeInTheDocument();
+  });
+
+  it('reads the current source again on refresh', async () => {
+    const currentSource = vi
+      .fn<SourceClient['currentSource']>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(SPOTIFY_SOURCE);
+    render(<Harness client={fakeClient({ currentSource })} />);
+    expect(await screen.findByText('none', { selector: 'output' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect(
+      await screen.findByText(SPOTIFY_SOURCE.name, { selector: 'output' }),
     ).toBeInTheDocument();
   });
 
