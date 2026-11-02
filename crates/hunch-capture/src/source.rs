@@ -43,7 +43,8 @@ impl fmt::Display for SourceKind {
 pub struct Source {
     pub id: SourceId,
     pub kind: SourceKind,
-    /// A name to show people: the device's name, or the app's executable name.
+    /// A name to show people: the device's name, or the app's executable name without its
+    /// extension (`chrome`). An app's name stays the same when it restarts, unlike its id.
     pub name: String,
     /// The system's default device for its direction. Always false for apps.
     pub is_default: bool,

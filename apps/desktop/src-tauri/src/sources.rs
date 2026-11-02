@@ -3,6 +3,8 @@
 use hunch_capture::{Source, SourceKind};
 use serde::Serialize;
 
+use crate::remembered::RememberedSource;
+
 /// The test beat's id in `list_sources`. Debug builds only.
 pub const DEV_SOURCE_ID: &str = "dev:test-beat";
 const DEV_SOURCE_NAME: &str = "Test beat (dev)";
@@ -118,14 +120,15 @@ pub fn find<'a>(listenables: &'a [Listenable], id: &str) -> Option<&'a Listenabl
 
 pub struct StartChoice<'a> {
     pub listenables: &'a [Listenable],
-    /// The id the user last selected, if one was saved.
-    pub remembered: Option<&'a str>,
+    /// The source the user last selected, if one was saved.
+    pub remembered: Option<&'a RememberedSource>,
     /// `HUNCH_DEV_SOURCE=test-beat` asked for the test beat.
     pub wants_dev_source: bool,
 }
 
 /// What `listen` starts: the dev source when asked for, else the remembered source while it's
-/// still around, else the default output device. `None` when none of those exist.
+/// still around (see `find_remembered`), else the default output device. `None` when none of
+/// those exist.
 pub fn choose_start(choice: StartChoice<'_>) -> Option<Listenable> {
     if choice.wants_dev_source {
         if let Some(dev) = find(choice.listenables, DEV_SOURCE_ID) {
@@ -134,7 +137,7 @@ pub fn choose_start(choice: StartChoice<'_>) -> Option<Listenable> {
     }
     if let Some(remembered) = choice
         .remembered
-        .and_then(|id| find(choice.listenables, id))
+        .and_then(|remembered| find_remembered(choice.listenables, remembered))
     {
         return Some(remembered.clone());
     }
@@ -143,6 +146,25 @@ pub fn choose_start(choice: StartChoice<'_>) -> Option<Listenable> {
         .iter()
         .find(|listenable| is_default_output(listenable))
         .cloned()
+}
+
+/// A device by its id, or a running app by its executable name, ignoring ASCII case as Windows
+/// does. When several running apps share the name, such as two separate browser installs, the
+/// first listed wins. Every listed app has an audio session.
+pub fn find_remembered<'a>(
+    listenables: &'a [Listenable],
+    remembered: &RememberedSource,
+) -> Option<&'a Listenable> {
+    match remembered {
+        RememberedSource::Device { source_id } => find(listenables, source_id),
+        RememberedSource::App { name } => listenables.iter().find(|listenable| {
+            matches!(
+                listenable,
+                Listenable::Capture(source)
+                    if source.kind == SourceKind::App && source.name.eq_ignore_ascii_case(name)
+            )
+        }),
+    }
 }
 
 fn is_default_output(listenable: &Listenable) -> bool {

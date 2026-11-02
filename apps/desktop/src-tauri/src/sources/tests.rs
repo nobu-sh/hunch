@@ -23,6 +23,15 @@ fn app(id: &str) -> Source {
     }
 }
 
+/// An app as the Windows backend lists it: a process-id id and the executable name.
+fn running_app(name: &str, process_id: u32) -> Source {
+    Source {
+        id: SourceId::new(format!("app:{process_id}")),
+        name: name.to_owned(),
+        ..app("unused")
+    }
+}
+
 fn mic(id: &str) -> Source {
     Source {
         is_output: false,
@@ -42,7 +51,32 @@ fn sample_listenables() -> Vec<Listenable> {
     })
 }
 
-fn start(remembered: Option<&str>) -> Option<String> {
+fn remembered_device(source_id: &str) -> RememberedSource {
+    RememberedSource::Device {
+        source_id: source_id.to_owned(),
+    }
+}
+
+fn remembered_app(name: &str) -> RememberedSource {
+    RememberedSource::App {
+        name: name.to_owned(),
+    }
+}
+
+fn start_from(sources: Vec<Source>, remembered: Option<&RememberedSource>) -> Option<String> {
+    let listenables = listenables(Available {
+        sources,
+        includes_dev_source: false,
+    });
+    choose_start(StartChoice {
+        listenables: &listenables,
+        remembered,
+        wants_dev_source: false,
+    })
+    .map(|listenable| listenable.id().to_owned())
+}
+
+fn start(remembered: Option<&RememberedSource>) -> Option<String> {
     let listenables = sample_listenables();
     choose_start(StartChoice {
         listenables: &listenables,
@@ -53,13 +87,74 @@ fn start(remembered: Option<&str>) -> Option<String> {
 }
 
 #[test]
-fn starts_the_remembered_source_while_it_exists() {
-    assert_eq!(start(Some("chrome")).as_deref(), Some("chrome"));
+fn starts_the_remembered_device_while_it_exists() {
+    assert_eq!(
+        start(Some(&remembered_device("speakers"))).as_deref(),
+        Some("speakers")
+    );
 }
 
 #[test]
-fn falls_back_to_the_default_output_when_the_remembered_source_is_gone() {
-    assert_eq!(start(Some("closed-app")).as_deref(), Some("headphones"));
+fn falls_back_to_the_default_output_when_the_remembered_device_is_gone() {
+    assert_eq!(
+        start(Some(&remembered_device("unplugged"))).as_deref(),
+        Some("headphones")
+    );
+}
+
+#[test]
+fn finds_a_restarted_app_by_name() {
+    let sources = vec![device("headphones", true), running_app("chrome", 7_000)];
+
+    let started = start_from(sources, Some(&remembered_app("chrome")));
+
+    assert_eq!(started.as_deref(), Some("app:7000"));
+}
+
+#[test]
+fn app_names_match_ignoring_case() {
+    let sources = vec![device("headphones", true), running_app("Chrome", 7_000)];
+
+    let started = start_from(sources, Some(&remembered_app("chrome")));
+
+    assert_eq!(started.as_deref(), Some("app:7000"));
+}
+
+#[test]
+fn the_first_listed_app_wins_when_several_share_the_name() {
+    let sources = vec![
+        device("headphones", true),
+        running_app("chrome", 300),
+        running_app("chrome", 100),
+    ];
+
+    let started = start_from(sources, Some(&remembered_app("chrome")));
+
+    assert_eq!(started.as_deref(), Some("app:300"));
+}
+
+#[test]
+fn falls_back_to_the_default_output_when_the_remembered_app_is_not_running() {
+    let sources = vec![device("headphones", true), running_app("spotify", 7_000)];
+
+    let started = start_from(sources, Some(&remembered_app("chrome")));
+
+    assert_eq!(started.as_deref(), Some("headphones"));
+}
+
+#[test]
+fn a_remembered_app_never_matches_a_device_of_the_same_name() {
+    let speakers = Source {
+        name: "chrome".to_owned(),
+        ..device("speakers", false)
+    };
+
+    let started = start_from(
+        vec![speakers, device("headphones", true)],
+        Some(&remembered_app("chrome")),
+    );
+
+    assert_eq!(started.as_deref(), Some("headphones"));
 }
 
 #[test]
@@ -89,7 +184,7 @@ fn the_dev_override_beats_the_remembered_source() {
 
     let started = choose_start(StartChoice {
         listenables: &listenables,
-        remembered: Some("chrome"),
+        remembered: Some(&remembered_app("chrome.exe")),
         wants_dev_source: true,
     });
 
@@ -105,7 +200,7 @@ fn a_remembered_dev_source_falls_back_when_the_build_has_none() {
 
     let started = choose_start(StartChoice {
         listenables: &listenables,
-        remembered: Some(DEV_SOURCE_ID),
+        remembered: Some(&remembered_device(DEV_SOURCE_ID)),
         wants_dev_source: true,
     });
 
