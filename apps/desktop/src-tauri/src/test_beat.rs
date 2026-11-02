@@ -1,4 +1,4 @@
-//! A placeholder feed until real capture lands: the same beat as `extension/dev/test-beat.ts`
+//! The dev source: the same beat as `extension/dev/test-beat.ts`
 //! (120 BPM, A natural minor: Am, Dm, Em, Am with kick, snare and hats), synthesized here and
 //! played in real time.
 
@@ -6,7 +6,7 @@ use std::f32::consts::{PI, TAU};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::feed::AudioFeed;
+use crate::feed::{AudioFeed, FeedEvent};
 
 /// The session's native rate, so the feed needs no resampling.
 const SAMPLE_RATE: u32 = 22_050;
@@ -80,7 +80,7 @@ impl AudioFeed for TestBeatFeed {
         SAMPLE_RATE
     }
 
-    fn next_chunk(&mut self) -> Option<Vec<f32>> {
+    fn next(&mut self) -> FeedEvent {
         let chunk_len = (CHUNK_SECONDS * SAMPLE_RATE as f32) as usize;
         let chunk: Vec<f32> = self
             .samples
@@ -96,7 +96,7 @@ impl AudioFeed for TestBeatFeed {
         let played_at = self.started
             + Duration::from_secs_f64(self.samples_sent as f64 / f64::from(SAMPLE_RATE));
         thread::sleep(played_at.saturating_duration_since(Instant::now()));
-        Some(chunk)
+        FeedEvent::Audio(chunk)
     }
 }
 

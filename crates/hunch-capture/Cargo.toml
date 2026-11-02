@@ -6,8 +6,17 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["cli"]
+# The `hunch-capture` binary. Library users such as the desktop app turn default features off.
+cli = ["dep:clap"]
+
+[[bin]]
+name = "hunch-capture"
+required-features = ["cli"]
+
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive"], optional = true }
 hunch-core.workspace = true
 rubato = "4"
 

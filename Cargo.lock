@@ -1467,7 +1467,10 @@ dependencies = [
 name = "hunch-desktop"
 version = "0.1.0"
 dependencies = [
+ "hunch-capture",
  "hunch-core",
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
 ]
