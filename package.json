@@ -10,7 +10,6 @@
     "test": "pnpm -r test",
     "browser": "pnpm --filter hunch-extension browser",
     "browser:install": "pnpm --filter hunch-extension browser:install",
-    "browser:check": "pnpm --filter hunch-extension browser:check",
-    "browser:screenshots": "pnpm --filter hunch-extension browser:screenshots"
+    "browser:check": "pnpm --filter hunch-extension browser:check"
   }
 }

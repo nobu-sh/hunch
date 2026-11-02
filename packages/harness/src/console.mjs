@@ -1,15 +1,19 @@
 /**
  * Collects console errors from the page and from every target whose URL starts with
  * `targetUrlPrefix`, such as an extension's service worker and offscreen document. The returned
- * array fills as errors arrive.
+ * array fills as errors arrive, and `onError` sees each one as it comes in.
  */
-export function collectConsoleErrors({ browser, page, targetUrlPrefix }) {
+export function collectConsoleErrors({ browser, page, targetUrlPrefix, onError }) {
   const errors = [];
+  const add = (error) => {
+    errors.push(error);
+    onError?.(error);
+  };
   const record = (source) => (message) => {
-    if (message.type() === 'error') errors.push(`${source}: ${message.text()}`);
+    if (message.type() === 'error') add(`${source}: ${message.text()}`);
   };
   page.on('console', record('page'));
-  page.on('pageerror', (error) => errors.push(`page: ${error.message}`));
+  page.on('pageerror', (error) => add(`page: ${error.message}`));
   if (!targetUrlPrefix) return errors;
 
   const watchTarget = async (target) => {

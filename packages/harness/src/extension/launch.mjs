@@ -5,9 +5,10 @@ import { extensionUrlPrefix, installExtension } from './driver.mjs';
 
 /**
  * Opens a browser (or attaches to `connect`), installs the build at `extensionDir`, and opens
- * `url` in a tab. `close` closes that tab on an attached browser and shuts a launched one.
+ * `url` in a tab. Console errors from the page and the extension stream to `onError`. `close`
+ * closes that tab on an attached browser and shuts a launched one.
  */
-export async function openExtensionSession({ connect, headless, extensionDir, url }) {
+export async function openExtensionSession({ connect, headless, extensionDir, url, onError }) {
   const session = await openBrowser({ connect, headless, enableExtensions: true });
   const { browser } = session;
   let page = null;
@@ -27,10 +28,11 @@ export async function openExtensionSession({ connect, headless, extensionDir, ur
       browser,
       page,
       targetUrlPrefix: extensionUrlPrefix(extension),
+      onError,
     });
     console.log(`Opening ${url}`);
     await page.goto(url);
-    return { browser, extension, page, errors, close };
+    return { browser, isConnected: session.isConnected, extension, page, errors, close };
   } catch (error) {
     await close();
     throw error;

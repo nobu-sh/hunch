@@ -1,24 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import {
-  DEFAULT_EXTENSION_DIR,
-  parseExtensionOptions,
-  parseScreenshotsOptions,
-} from './options.mjs';
+import { DEFAULT_CHECK_SECONDS, DEFAULT_EXTENSION_DIR, parseExtensionOptions } from './options.mjs';
 
 describe('parseExtensionOptions', () => {
-  it('is headed by default', () => {
+  it('is headed and stays open by default', () => {
     const options = parseExtensionOptions([]);
     expect(options.headless).toBe(false);
-    expect(options.seconds).toBe(12);
+    expect(options.seconds).toBeNull();
     expect(options.extension).toBe(DEFAULT_EXTENSION_DIR);
   });
 
   it('runs headless with --headless', () => {
-    expect(parseExtensionOptions(['--headless', '--check']).headless).toBe(true);
+    expect(parseExtensionOptions(['--headless']).headless).toBe(true);
   });
 
-  it('no longer accepts --headed', () => {
+  it('no longer accepts --headed or --keep-open', () => {
     expect(() => parseExtensionOptions(['--headed'])).toThrow(/--headed/);
+    expect(() => parseExtensionOptions(['--keep-open'])).toThrow(/--keep-open/);
+  });
+
+  it('listens for a while before checking', () => {
+    expect(parseExtensionOptions(['--check']).seconds).toBe(DEFAULT_CHECK_SECONDS);
+    expect(parseExtensionOptions(['--check', '--seconds', '5']).seconds).toBe(5);
   });
 
   it('parses --seconds as a number', () => {
@@ -38,22 +40,5 @@ describe('parseExtensionOptions', () => {
 
   it('rejects --headless with --connect', () => {
     expect(() => parseExtensionOptions(['--headless', '--connect', '9222'])).toThrow(/--connect/);
-  });
-
-  it('rejects --keep-open with --headless', () => {
-    expect(() => parseExtensionOptions(['--headless', '--keep-open'])).toThrow(/--keep-open/);
-  });
-});
-
-describe('parseScreenshotsOptions', () => {
-  it('defaults the build and leaves the output folder to the command', () => {
-    expect(parseScreenshotsOptions([])).toEqual({
-      extension: DEFAULT_EXTENSION_DIR,
-      help: false,
-    });
-  });
-
-  it('takes --out', () => {
-    expect(parseScreenshotsOptions(['--out', 'shots']).out).toBe('shots');
   });
 });

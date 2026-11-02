@@ -8,8 +8,9 @@ const HEADLESS_VIEWPORT = { width: 1280, height: 800 };
 
 /**
  * Launches Chrome for Testing, in a visible window unless `headless`, or connects to `connect`
- * when given: a port, an http(s) DevTools URL, or a ws(s) browser endpoint. `close` shuts a launched browser and only detaches from a
- * connected one.
+ * when given: a port, an http(s) DevTools URL, or a ws(s) browser endpoint. `close` shuts a
+ * launched browser and only detaches from a connected one. `browser.wsEndpoint()` is the DevTools
+ * endpoint other tools can attach to.
  */
 export async function openBrowser({ connect, headless = false, enableExtensions = false }) {
   if (connect) {
@@ -21,7 +22,8 @@ export async function openBrowser({ connect, headless = false, enableExtensions 
     executablePath: await chromeExecutable(),
     headless,
     enableExtensions,
-    pipe: true,
+    // Over a debugging port rather than a pipe, so other tools can attach to the same browser.
+    pipe: false,
     defaultViewport: headless ? HEADLESS_VIEWPORT : null,
     // A muted browser also mutes tab capture, so pages play out loud, even headless.
     ignoreDefaultArgs: ['--mute-audio'],

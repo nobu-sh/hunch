@@ -17,8 +17,7 @@
     "build:wasm": "node scripts/build-wasm.mjs",
     "browser": "hunch-harness extension",
     "browser:install": "hunch-harness install",
-    "browser:check": "hunch-harness extension --check --headless",
-    "browser:screenshots": "hunch-harness screenshots"
+    "browser:check": "hunch-harness extension --check --headless"
   },
   "dependencies": {
     "@hunch/ui": "workspace:*"
