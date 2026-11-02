@@ -48,6 +48,13 @@ describe('parseCommandLine', () => {
     });
   });
 
+  it('parses attach flags', () => {
+    expect(parseCommandLine(['--connect', '9230', '--reuse-page']).options).toEqual({
+      connect: '9230',
+      reusePage: true,
+    });
+  });
+
   it('takes a mixin path', () => {
     expect(parseCommandLine(['--mixin', 'extension/dev/browser.ts']).mixin).toBe(
       'extension/dev/browser.ts',
@@ -151,6 +158,15 @@ describe('mergeOptions', () => {
       commandLine: { connect: '9222', url: 'http://a/' },
     });
     expect(merged.connect).toBe('9222');
+  });
+
+  it('opens a new tab in an attached browser unless the page is reused', () => {
+    expect(mergeOptions({ mixin: { connect: '9230' }, commandLine: {} }).reusePage).toBe(false);
+    const merged = mergeOptions({
+      mixin: { connect: '9230', reusePage: true },
+      commandLine: {},
+    });
+    expect(merged).toMatchObject({ connect: '9230', reusePage: true });
   });
 
   it('rejects --devtools with --headless', () => {

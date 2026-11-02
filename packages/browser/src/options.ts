@@ -17,6 +17,11 @@ export interface BrowserOptions {
   headless: boolean;
   /** Attach to this browser instead of launching one: a port, http(s) URL or ws(s) endpoint. */
   connect: string | null;
+  /**
+   * With `connect`, drive the browser's first open page instead of opening a tab, e.g. an app's
+   * only webview. A launched browser always drives its first tab.
+   */
+  reusePage: boolean;
   /** Unpacked extension folders to load. */
   extensions: string[];
   /** Close after this long; null stays open until the browser closes. */
@@ -48,6 +53,7 @@ export const DEFAULT_OPTIONS: BrowserOptions = {
   url: null,
   headless: false,
   connect: null,
+  reusePage: false,
   extensions: [],
   seconds: null,
   windowSize: null,
@@ -82,6 +88,7 @@ export function parseCommandLine(args: string[]): CommandLine {
       url: { type: 'string' },
       headless: { type: 'boolean' },
       connect: { type: 'string' },
+      'reuse-page': { type: 'boolean' },
       extension: { type: 'string', multiple: true },
       seconds: { type: 'string' },
       'window-size': { type: 'string' },
@@ -107,6 +114,7 @@ export function parseCommandLine(args: string[]): CommandLine {
     url: values.url,
     headless: values.headless,
     connect: values.connect,
+    reusePage: values['reuse-page'],
     extensions: values.extension,
     seconds: values.seconds === undefined ? undefined : parseSeconds(values.seconds),
     windowSize:

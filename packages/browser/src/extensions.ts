@@ -28,7 +28,13 @@ export async function loadExtension(params: {
   const { browser, path } = params;
   const manifest = await readManifest(path);
   // Installed after launch: passing the path to `launch` doesn't finish loading it.
-  const id = await browser.installExtension(path);
+  const id = await browser.installExtension(path).catch((error: unknown) => {
+    throw new Error(
+      `Couldn't install the extension at ${path}. An attached browser needs ` +
+        '--enable-unsafe-extension-debugging, and embedded webviews may not install any.',
+      { cause: error },
+    );
+  });
   const handle = (await browser.extensions()).get(id);
   if (!handle) throw new Error(`Chrome didn't list the extension it installed from ${path}`);
   const urlPrefix = `chrome-extension://${id}/`;
