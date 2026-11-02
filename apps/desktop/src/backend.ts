@@ -45,6 +45,8 @@ export interface Backend extends SourceClient {
   /** Moves and sizes the window's client area in one step. */
   setWindowBounds: (bounds: WindowBounds) => Promise<void>;
   setAlwaysOnTop: (enabled: boolean) => Promise<void>;
+  /** Hides the window from the screen, keeping its size and webview, while it resizes. */
+  setWindowCloaked: (cloaked: boolean) => Promise<void>;
   /** Hides the window to the tray; its session keeps running. */
   hideToTray: () => Promise<void>;
   /** Hears always-on-top changes from the header toggle and the tray alike. */
@@ -68,6 +70,7 @@ export const backend: Backend = {
   saveWindowPosition: (position) => invoke('save_window_position', { position }),
   setWindowBounds: (bounds) => invoke('set_window_bounds', { bounds }),
   setAlwaysOnTop: (enabled) => invoke('set_always_on_top', { enabled }),
+  setWindowCloaked: (cloaked) => invoke('set_window_cloaked', { cloaked }),
   hideToTray: () => invoke('hide_to_tray'),
   onAlwaysOnTop: (handler) =>
     listen<boolean>(ALWAYS_ON_TOP_EVENT, ({ payload }) => {

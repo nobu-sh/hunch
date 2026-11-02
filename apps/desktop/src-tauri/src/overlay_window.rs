@@ -6,6 +6,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 use crate::bounds::{self, Bounds};
+use crate::cloak;
 use crate::tray;
 use crate::window_settings::{SavedPosition, WindowSettings, WindowSettingsFile};
 
@@ -57,6 +58,12 @@ pub fn save_window_position(state: State<'_, WindowState>, position: SavedPositi
 #[tauri::command]
 pub fn set_always_on_top(app: AppHandle, enabled: bool) -> Result<(), String> {
     apply_always_on_top(&app, enabled)
+}
+
+/// Hides the window from the screen across a resize, while its webview paints the new size.
+#[tauri::command]
+pub fn set_window_cloaked(window: WebviewWindow, cloaked: bool) -> Result<(), String> {
+    cloak::set(&window, cloaked)
 }
 
 /// The header's close button: the window goes to the tray and keeps listening.

@@ -5,6 +5,7 @@
 
 mod bounds;
 mod capture_feed;
+mod cloak;
 mod commands;
 mod feed;
 mod listener;
@@ -54,6 +55,7 @@ fn main() {
             overlay_window::set_always_on_top,
             overlay_window::set_window_bounds,
             overlay_window::hide_to_tray,
+            overlay_window::set_window_cloaked,
         ])
         .run(tauri::generate_context!())
         .expect("Hunch failed to start its window");

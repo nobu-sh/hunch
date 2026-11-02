@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
   applySourceStatus,
   createSessionState,
@@ -20,7 +21,7 @@ import {
   type CloseLabels,
 } from '@hunch/ui/components';
 import { backend } from './backend';
-import { anchorWindowTo } from './placement';
+import { anchorWindowTo, type WindowAnchor } from './placement';
 import { followSession } from './session';
 import { useAlwaysOnTop } from './use-always-on-top';
 import { useSubscription } from './use-subscription';
@@ -65,10 +66,27 @@ export function App() {
   useSubscription({ subscribe: () => backend.onSourceStatus(followStatus), onError: showError });
   const alwaysOnTop = useAlwaysOnTop(showError);
 
+  const anchorRef = useRef<WindowAnchor | null>(null);
   useEffect(() => {
     if (rootRef.current === null) return;
-    return anchorWindowTo(rootRef.current);
+    const anchor = anchorWindowTo(rootRef.current);
+    anchorRef.current = anchor;
+    return () => {
+      anchor.stop();
+      anchorRef.current = null;
+    };
   }, []);
+  // The panel and pill differ most in size, so swapping them is resized out of sight.
+  const setCollapsed = (collapsed: boolean) => {
+    const render = () => {
+      flushSync(() => {
+        setIsCollapsed(collapsed);
+      });
+    };
+    const anchor = anchorRef.current;
+    if (anchor === null) render();
+    else anchor.resizeOutOfSight(render).catch(showError);
+  };
 
   const statusSource = picker.current?.id === status?.sourceId ? picker.current : null;
   const notice = status && sourceNotice({ status, source: statusSource });
@@ -79,10 +97,10 @@ export function App() {
         view={overlayView(state)}
         isCollapsed={isCollapsed}
         onCollapse={() => {
-          setIsCollapsed(true);
+          setCollapsed(true);
         }}
         onExpand={() => {
-          setIsCollapsed(false);
+          setCollapsed(false);
         }}
         onClose={() => {
           backend.hideToTray().catch(showError);

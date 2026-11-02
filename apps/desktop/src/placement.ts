@@ -21,6 +21,18 @@ import { backend, type SavedPosition, type WindowBounds } from './backend';
 
 /** How long the window stays still after a move before it counts as dropped. */
 const DROP_SETTLE_MS = 300;
+/** The longest a resize stays cloaked if the page never reaches its new size. */
+const CLOAK_TIMEOUT_MS = 250;
+
+/** Keeps the window placed; `stop` is the cleanup. */
+export interface WindowAnchor {
+  stop: () => void;
+  /**
+   * Runs `render`, which must update the DOM synchronously, and resizes to it with the window
+   * cloaked, so the old and new sizes swap in one frame instead of showing bare blur.
+   */
+  resizeOutOfSight: (render: () => void) => Promise<void>;
+}
 
 interface Anchor {
   monitor: Monitor;
@@ -88,6 +100,32 @@ function measure(element: HTMLElement): Size | null {
   return width === 0 || height === 0 ? null : { width, height };
 }
 
+/** Resolves once the page has painted at the size of `bounds`, or after the timeout. */
+function paintedAt(bounds: WindowBounds): Promise<void> {
+  const hasSize = () =>
+    Math.round(window.innerWidth * window.devicePixelRatio) === bounds.width &&
+    Math.round(window.innerHeight * window.devicePixelRatio) === bounds.height;
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', check);
+      resolve();
+    };
+    const timer = setTimeout(finish, CLOAK_TIMEOUT_MS);
+    // A frame's callbacks run before it paints, so the second one follows the painted frame.
+    const afterNextPaint = () => {
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+    };
+    function check() {
+      if (!hasSize()) return;
+      window.removeEventListener('resize', check);
+      afterNextPaint();
+    }
+    window.addEventListener('resize', check);
+    check();
+  });
+}
+
 function reportFailure(action: string) {
   return (error: unknown) => {
     console.error(`Hunch couldn't ${action} the window:`, error);
@@ -96,9 +134,9 @@ function reportFailure(action: string) {
 
 /**
  * Places the window at its saved spot, shows it, and keeps it the size of `element` around its
- * anchored corner. Returns the cleanup.
+ * anchored corner.
  */
-export function anchorWindowTo(element: HTMLElement): () => void {
+export function anchorWindowTo(element: HTMLElement): WindowAnchor {
   const appWindow = getCurrentWindow();
   let anchor: Anchor | null = null;
   // Where the client area was last put, to tell the window's own moves from the user's.
@@ -109,12 +147,28 @@ export function anchorWindowTo(element: HTMLElement): () => void {
   const disposal = new AbortController();
   const isDisposed = () => disposal.signal.aborted;
 
-  const place = async () => {
+  const place = async (): Promise<WindowBounds | null> => {
     const panel = measure(element);
-    if (anchor === null || panel === null) return;
+    if (anchor === null || panel === null) return null;
     const bounds = boundsFor({ anchor, panel });
     placedAt = { x: bounds.x, y: bounds.y };
     await backend.setWindowBounds(bounds);
+    return bounds;
+  };
+
+  const resizeOutOfSight = async (render: () => void) => {
+    if (anchor === null) {
+      render();
+      return;
+    }
+    await backend.setWindowCloaked(true);
+    try {
+      render();
+      const bounds = await place();
+      if (bounds !== null) await paintedAt(bounds);
+    } finally {
+      await backend.setWindowCloaked(false);
+    }
   };
 
   const drop = async () => {
@@ -163,10 +217,11 @@ export function anchorWindowTo(element: HTMLElement): () => void {
   };
   start().catch(reportFailure('place'));
 
-  return () => {
+  const stop = () => {
     disposal.abort();
     observer.disconnect();
     clearTimeout(dropTimer);
     stopFollowingMoves?.();
   };
+  return { stop, resizeOutOfSight };
 }
