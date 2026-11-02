@@ -59,15 +59,17 @@ export const DEFAULT_OPTIONS: BrowserOptions = {
   chromeArgs: [],
 };
 
-/** Options that only mean something for a browser this tool launches. */
-const LAUNCH_ONLY: (keyof BrowserOptions)[] = [
-  'headless',
-  'windowSize',
-  'devtools',
-  'profile',
-  'mute',
-  'chromeArgs',
-];
+/** Options that only mean something for a browser this tool launches, with their flags. */
+const LAUNCH_ONLY_FLAGS = {
+  headless: '--headless',
+  windowSize: '--window-size',
+  devtools: '--devtools',
+  profile: '--profile',
+  mute: '--mute',
+  chromeArgs: '--chrome-arg',
+} as const satisfies Partial<Record<keyof BrowserOptions, string>>;
+type LaunchOnlyOption = keyof typeof LAUNCH_ONLY_FLAGS;
+const LAUNCH_ONLY = Object.keys(LAUNCH_ONLY_FLAGS) as LaunchOnlyOption[];
 const INSTALL_COMMAND = 'install';
 const WINDOW_SIZE_PATTERN = /^(\d+)x(\d+)$/;
 
@@ -170,25 +172,39 @@ export function resolvePaths(params: {
 
 /**
  * The options to run with: defaults, then the mixin's, then the command line's, each replacing
- * the one before. Throws on combinations that can't work.
+ * the one before. With --connect, the mixin's launch-only defaults are dropped and only launch-only
+ * flags typed on the command line are an error. Throws on combinations that can't work.
  */
 export function mergeOptions(params: {
   mixin: Partial<BrowserOptions>;
   commandLine: Partial<BrowserOptions>;
 }): BrowserOptions {
-  const merged: BrowserOptions = { ...DEFAULT_OPTIONS, ...params.mixin, ...params.commandLine };
-  if (merged.connect !== null) {
-    const isChanged = (key: keyof BrowserOptions) =>
-      JSON.stringify(merged[key]) !== JSON.stringify(DEFAULT_OPTIONS[key]);
-    const conflicts = LAUNCH_ONLY.filter(isChanged);
-    if (conflicts.length > 0) {
-      throw new Error(
-        `${conflicts.join(', ')} only apply to a launched browser; drop them with --connect`,
-      );
-    }
+  const { commandLine } = params;
+  const connect = commandLine.connect ?? params.mixin.connect ?? null;
+  const isConnecting = connect !== null;
+  if (isConnecting) {
+    const typed = LAUNCH_ONLY.filter((key) => commandLine[key] !== undefined);
+    if (typed.length > 0) throw new Error(launchOnlyConflictMessage(typed));
   }
+  const mixin = isConnecting ? withoutLaunchOnly(params.mixin) : params.mixin;
+  const merged: BrowserOptions = { ...DEFAULT_OPTIONS, ...mixin, ...commandLine };
   if (merged.headless && merged.devtools) {
     throw new Error('--devtools needs a visible window; drop --headless');
   }
   return merged;
+}
+
+function withoutLaunchOnly(options: Partial<BrowserOptions>): Partial<BrowserOptions> {
+  const isLaunchOnly = (key: string) => key in LAUNCH_ONLY_FLAGS;
+  return Object.fromEntries(Object.entries(options).filter(([key]) => !isLaunchOnly(key)));
+}
+
+function launchOnlyConflictMessage(options: LaunchOnlyOption[]): string {
+  const flags: string[] = options.map((key) => LAUNCH_ONLY_FLAGS[key]);
+  const last = flags.pop() ?? '';
+  const isOne = flags.length === 0;
+  const listed = isOne ? last : `${flags.join(', ')} and ${last}`;
+  const verb = isOne ? 'applies' : 'apply';
+  const pronoun = isOne ? 'it' : 'them';
+  return `${listed} only ${verb} to a launched browser; drop ${pronoun} when using --connect`;
 }

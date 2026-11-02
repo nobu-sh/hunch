@@ -114,10 +114,35 @@ describe('mergeOptions', () => {
     expect(merged).toMatchObject({ headless: false, seconds: 12, url: 'http://b/' });
   });
 
-  it('rejects launch-only options with --connect', () => {
+  it('ignores the mixin launch-only defaults with --connect', () => {
+    const merged = mergeOptions({
+      mixin: { headless: true, mute: true, windowSize: { width: 800, height: 600 }, seconds: 12 },
+      commandLine: { connect: '9222' },
+    });
+    expect(merged).toMatchObject({
+      connect: '9222',
+      headless: false,
+      mute: false,
+      windowSize: null,
+      seconds: 12,
+    });
+  });
+
+  it('rejects a launch-only flag typed with --connect', () => {
     expect(() =>
-      mergeOptions({ mixin: {}, commandLine: { connect: '9222', headless: true, mute: true } }),
-    ).toThrow('headless, mute only apply to a launched browser');
+      mergeOptions({ mixin: {}, commandLine: { connect: '9222', headless: true } }),
+    ).toThrow('--headless only applies to a launched browser; drop it when using --connect');
+  });
+
+  it('names every launch-only flag typed with --connect', () => {
+    expect(() =>
+      mergeOptions({
+        mixin: {},
+        commandLine: { connect: '9222', headless: true, mute: true, chromeArgs: ['--x'] },
+      }),
+    ).toThrow(
+      '--headless, --mute and --chrome-arg only apply to a launched browser; drop them when using --connect',
+    );
   });
 
   it('allows --connect with extensions and a URL', () => {
