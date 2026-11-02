@@ -9,7 +9,7 @@ Detects the key and BPM of audio as it plays. A Rust analysis core runs natively
 - `crates/hunch-eval`: native CLI that scores the core against datasets in `data/` (gitignored). Run `cargo run -p hunch-eval --release -- --help`.
 - `extension/`: WXT + TypeScript. Its build and browser commands run from `extension/`.
 - `packages/ui` (`@hunch/ui`): shared UI logic and components.
-- `packages/harness` (`@hunch/harness`): Chrome for Testing harness. Generic parts (install, launch or attach over DevTools, closed shadow roots, console errors, screenshots, the test-beat page) in `src/`, the extension driver and CLI in `src/extension/`.
+- `packages/harness` (`@hunch/harness`): Chrome for Testing harness. Generic parts (installing Chrome for Testing, launching or attaching over DevTools with the endpoint recorded, console errors, the test-beat page) in `src/`; the extension driver (install, turn on, read session state) and CLI in `src/extension/`.
 - The repo root is a pnpm workspace (`extension`, `packages/*`) with one lockfile. Run `pnpm install` from the root.
 
 ## Checks (same as CI)
