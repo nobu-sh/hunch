@@ -175,3 +175,35 @@ describe('Overlay history', () => {
     expect(props.onCopy).toHaveBeenCalledWith('96 BPM');
   });
 });
+
+describe('Overlay slots', () => {
+  it('replaces the readouts with the body while one is given', () => {
+    const { container } = renderOverlay({
+      view: ANALYZING_VIEW,
+      body: <div data-ref="picker">picker</div>,
+    });
+
+    expect(container.querySelector('[data-ref="picker"]')).toBeInTheDocument();
+    expect(container.querySelector('.readouts')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-ref="status"]')).toHaveTextContent('analyzing 6s');
+  });
+
+  it('shows a notice above the readouts and header actions before collapse', () => {
+    const { container } = renderOverlay({
+      view: ANALYZING_VIEW,
+      notice: <div data-ref="notice">Spotify closed</div>,
+      headerActions: <button>Sources</button>,
+    });
+
+    const notice = container.querySelector('[data-ref="notice"]');
+    const readouts = container.querySelector('.readouts');
+    if (!notice || !readouts) throw new Error('No notice or readouts');
+    expect(notice.compareDocumentPosition(readouts)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    const header = within(container.querySelector<HTMLElement>('.header') ?? container);
+    expect(header.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Sources',
+      '–',
+      '×',
+    ]);
+  });
+});

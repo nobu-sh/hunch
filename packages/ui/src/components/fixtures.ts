@@ -1,6 +1,7 @@
 import type { OverlayView } from '../overlay-view';
+import type { AudioSource, SourceList, SourceStatus } from '../sources';
 
-/** Overlay views for component tests and the preview page. */
+/** Overlay views and sources for component tests and the preview page. */
 
 export const LISTENING_VIEW: OverlayView = {
   status: 'listening…',
@@ -51,4 +52,73 @@ export const ERROR_VIEW: OverlayView = {
   ...LISTENING_VIEW,
   status: 'Tab capture failed',
   statusTone: 'error',
+};
+
+export const SPEAKERS_SOURCE: AudioSource = {
+  id: 'device:speakers',
+  kind: 'device',
+  name: 'Speakers (Realtek Audio)',
+  isDefault: true,
+  isOutput: true,
+};
+
+export const HEADSET_SOURCE: AudioSource = {
+  id: 'device:headset',
+  kind: 'device',
+  name: 'Headset Earphone',
+  isDefault: false,
+  isOutput: true,
+};
+
+export const MIC_SOURCE: AudioSource = {
+  id: 'device:mic',
+  kind: 'device',
+  name: 'Microphone Array',
+  isDefault: true,
+  isOutput: false,
+};
+
+export const SPOTIFY_SOURCE: AudioSource = {
+  id: 'app:spotify',
+  kind: 'app',
+  name: 'Spotify',
+  isDefault: false,
+  isOutput: true,
+};
+
+export const BROWSER_SOURCE: AudioSource = {
+  id: 'app:chrome',
+  kind: 'app',
+  name: 'Google Chrome',
+  isDefault: false,
+  isOutput: true,
+};
+
+export const SOURCE_LIST: SourceList = {
+  sources: [SPOTIFY_SOURCE, BROWSER_SOURCE, SPEAKERS_SOURCE, HEADSET_SOURCE, MIC_SOURCE],
+  listsApps: true,
+};
+
+/** A platform that can only capture whole devices. */
+export const DEVICES_ONLY_LIST: SourceList = {
+  sources: [SPEAKERS_SOURCE, HEADSET_SOURCE, MIC_SOURCE],
+  listsApps: false,
+};
+
+export const ENDED_STATUS: SourceStatus = {
+  sourceId: SPOTIFY_SOURCE.id,
+  state: 'ended',
+  message: null,
+};
+
+export const SILENT_STATUS: SourceStatus = {
+  sourceId: BROWSER_SOURCE.id,
+  state: 'silent',
+  message: null,
+};
+
+export const FAILED_STATUS: SourceStatus = {
+  sourceId: HEADSET_SOURCE.id,
+  state: 'failed',
+  message: 'The device is in use by another app',
 };
