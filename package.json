@@ -1,6 +1,7 @@
 {
   "name": "hunch",
   "private": true,
+  "version": "0.1.0",
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "lint": "pnpm -r lint",
@@ -13,7 +14,9 @@
     "browser:check": "hunch-browser --mixin extension/dev/browser-check.ts",
     "browser:desktop": "hunch-browser --mixin apps/desktop/dev/browser.ts",
     "desktop:dev": "pnpm --filter hunch-desktop tauri:dev",
-    "desktop:build": "pnpm --filter hunch-desktop tauri:build"
+    "desktop:build": "pnpm --filter hunch-desktop tauri:build",
+    "release:version": "node packages/release/src/cli.ts version",
+    "release:check": "node packages/release/src/cli.ts check"
   },
   "devDependencies": {
     "@hunch/browser": "workspace:*"
