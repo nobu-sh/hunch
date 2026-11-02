@@ -1,0 +1,30 @@
+{
+  "name": "@hunch/harness",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./extension": "./src/extension/index.mjs"
+  },
+  "bin": {
+    "hunch-harness": "./src/cli.mjs"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@puppeteer/browsers": "^3.2.6",
+    "puppeteer-core": "^25.16.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "vitest": "^4.1.12"
+  }
+}

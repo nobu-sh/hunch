@@ -7,6 +7,9 @@
     "format": "pnpm -r format",
     "format:check": "pnpm -r format:check",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "browser": "pnpm --filter hunch-extension browser",
+    "browser:install": "pnpm --filter hunch-extension browser:install",
+    "browser:check": "pnpm --filter hunch-extension browser:check"
   }
 }

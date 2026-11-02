@@ -1,4 +1,3 @@
 .output/
 .wxt/
 src/wasm/pkg/
-.chrome/
