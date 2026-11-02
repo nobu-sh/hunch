@@ -5,7 +5,8 @@ import { latestEstimate, type HistoryEntry, type SessionState } from './session-
 
 /** Tuning offsets smaller than this are normal and not worth showing. */
 export const TUNING_DISPLAY_CENTS = 15;
-const EMPTY = '—';
+/** Shown in place of a value that isn't known yet. */
+export const EMPTY_VALUE = '—';
 
 export type StatusTone = 'idle' | 'active' | 'locked' | 'error';
 
@@ -95,7 +96,7 @@ export function estimateCopyText(estimate: Estimate | null): string {
   const parts: string[] = [];
   if (estimate?.key) parts.push(estimate.key);
   if (bpm !== null) parts.push(`${bpm} BPM`);
-  return parts.length > 0 ? parts.join(' · ') : EMPTY;
+  return parts.length > 0 ? parts.join(' · ') : EMPTY_VALUE;
 }
 
 function formatClock(timestamp: number): string {
@@ -108,8 +109,8 @@ function historyRow(entry: HistoryEntry): HistoryRowView {
   const { estimate } = entry;
   return {
     time: formatClock(entry.endedAt),
-    key: estimate?.key ?? EMPTY,
-    bpm: roundedBpm(estimate) ?? EMPTY,
+    key: estimate?.key ?? EMPTY_VALUE,
+    bpm: roundedBpm(estimate) ?? EMPTY_VALUE,
     copyText: estimateCopyText(estimate),
   };
 }
@@ -133,8 +134,8 @@ function statusLine(params: {
 
 function pillText(params: { key: KeyView | null; bpm: BpmView | null }): string {
   const parsedKey = params.key ? parseKey(params.key.label) : null;
-  const keyLabel = parsedKey ? shortKeyLabel(parsedKey) : EMPTY;
-  return `${params.bpm?.label ?? EMPTY} · ${keyLabel}`;
+  const keyLabel = parsedKey ? shortKeyLabel(parsedKey) : EMPTY_VALUE;
+  return `${params.bpm?.label ?? EMPTY_VALUE} · ${keyLabel}`;
 }
 
 export function overlayView(state: SessionState): OverlayView {

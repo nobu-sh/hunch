@@ -1,6 +1,7 @@
 {
   "extends": "./.wxt/tsconfig.json",
   "compilerOptions": {
+    "jsx": "react-jsx",
     // Replaces WXT's generated aliases, so `@/*` is repeated here.
     "paths": {
       "@/*": ["./src/*"],
