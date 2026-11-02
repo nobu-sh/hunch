@@ -8,8 +8,11 @@
     "format:check": "pnpm -r format:check",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "browser": "pnpm --filter hunch-extension browser",
-    "browser:install": "pnpm --filter hunch-extension browser:install",
-    "browser:check": "pnpm --filter hunch-extension browser:check"
+    "browser": "hunch-browser",
+    "browser:extension": "hunch-browser --mixin extension/browser/dev.ts",
+    "browser:check": "hunch-browser --mixin extension/browser/check.ts"
+  },
+  "devDependencies": {
+    "@hunch/browser": "workspace:*"
   }
 }

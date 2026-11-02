@@ -6,5 +6,7 @@
       "@/*": ["./src/*"],
       "@/wasm/pkg/*": ["./src/wasm/pkg/*", "./src/wasm/fallback/*"]
     }
-  }
+  },
+  // The browser mixins run in Node and have their own tsconfig.
+  "exclude": ["browser", "node_modules", ".output"]
 }

@@ -6,7 +6,11 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    devDependencies:
+      '@hunch/browser':
+        specifier: workspace:*
+        version: link:packages/browser
 
   extension:
     dependencies:
@@ -17,9 +21,52 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.13.0(jiti@2.7.0))
-      '@hunch/harness':
+      '@hunch/browser':
         specifier: workspace:*
-        version: link:../packages/harness
+        version: link:../packages/browser
+      '@types/node':
+        specifier: ^26.0.0
+        version: 26.6.6
+      eslint:
+        specifier: ^10.13.0
+        version: 10.13.0(jiti@2.7.0)
+      globals:
+        specifier: ^17.13.0
+        version: 17.13.0
+      prettier:
+        specifier: ^3.9.10
+        version: 3.9.10
+      puppeteer-core:
+        specifier: ^25.16.0
+        version: 25.16.0
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      typescript-eslint:
+        specifier: ^8.72.0
+        version: 8.72.0(eslint@10.13.0(jiti@2.7.0))(typescript@6.0.3)
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))
+      wxt:
+        specifier: ^0.21.4
+        version: 0.21.4(eslint@10.13.0(jiti@2.7.0))(rolldown@1.2.15)(typescript@6.0.3)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))
+
+  packages/browser:
+    dependencies:
+      '@puppeteer/browsers':
+        specifier: ^3.2.6
+        version: 3.2.6
+      puppeteer-core:
+        specifier: ^25.16.0
+        version: 25.16.0
+    devDependencies:
+      '@eslint/js':
+        specifier: ^10.0.1
+        version: 10.0.1(eslint@10.13.0(jiti@2.7.0))
+      '@types/node':
+        specifier: ^26.0.0
+        version: 26.6.6
       eslint:
         specifier: ^10.13.0
         version: 10.13.0(jiti@2.7.0)
@@ -37,35 +84,7 @@ importers:
         version: 8.72.0(eslint@10.13.0(jiti@2.7.0))(typescript@6.0.3)
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(vite@8.3.5(jiti@2.7.0))
-      wxt:
-        specifier: ^0.21.4
-        version: 0.21.4(eslint@10.13.0(jiti@2.7.0))(rolldown@1.2.15)(typescript@6.0.3)(vite@8.3.5(jiti@2.7.0))
-
-  packages/harness:
-    dependencies:
-      '@puppeteer/browsers':
-        specifier: ^3.2.6
-        version: 3.2.6
-      puppeteer-core:
-        specifier: ^25.16.0
-        version: 25.16.0
-    devDependencies:
-      '@eslint/js':
-        specifier: ^10.0.1
-        version: 10.0.1(eslint@10.13.0(jiti@2.7.0))
-      eslint:
-        specifier: ^10.13.0
-        version: 10.13.0(jiti@2.7.0)
-      globals:
-        specifier: ^17.13.0
-        version: 17.13.0
-      prettier:
-        specifier: ^3.9.10
-        version: 3.9.10
-      vitest:
-        specifier: ^4.1.12
-        version: 4.1.12(vite@8.3.5(jiti@2.7.0))
+        version: 4.1.12(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))
 
   packages/ui:
     devDependencies:
@@ -89,7 +108,7 @@ importers:
         version: 8.72.0(eslint@10.13.0(jiti@2.7.0))(typescript@6.0.3)
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(vite@8.3.5(jiti@2.7.0))
+        version: 4.1.12(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))
 
 packages:
 
@@ -358,6 +377,9 @@ packages:
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
+
+  '@types/node@26.6.6':
+    resolution: {integrity: sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog==}
 
   '@typescript-eslint/eslint-plugin@8.72.0':
     resolution: {integrity: sha512-aysKgysPX9XOv/dk95UkvUDe++Q3n3dJPG9CEWT3RUccxfkPJ+Qn6nhKPDhZXU6Ofo9kgwGWwKyQCnZIXTgngg==}
@@ -1232,6 +1254,9 @@ packages:
   uhyphen@0.2.0:
     resolution: {integrity: sha512-qz3o9CHXmJJPGBdqzab7qAYuW8kQGKNEuoHFYrBwV6hWIMcpAmxDLXojcHfFr9US1Pe6zUswEIJIbLI610fuqA==}
 
+  undici-types@8.9.0:
+    resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
+
   unimport@6.5.0:
     resolution: {integrity: sha512-t0KLJLRbebz3f7NrQe+vy2ObeugVeM1XqI2oeYnauddmHSglYj3U6bxOJ65IbXmOFkcAGFJK2OyGH7aqHPM6Ug==}
     engines: {node: '>=18.12.0'}
@@ -1648,6 +1673,10 @@ snapshots:
 
   '@types/json-schema@7.0.15': {}
 
+  '@types/node@26.6.6':
+    dependencies:
+      undici-types: 8.9.0
+
   '@typescript-eslint/eslint-plugin@8.72.0(@typescript-eslint/parser@8.72.0(eslint@10.13.0(jiti@2.7.0))(typescript@6.0.3))(eslint@10.13.0(jiti@2.7.0))(typescript@6.0.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
@@ -1748,13 +1777,13 @@ snapshots:
       chai: 6.3.0
       tinyrainbow: 3.2.0
 
-  '@vitest/mocker@4.1.12(vite@8.3.5(jiti@2.7.0))':
+  '@vitest/mocker@4.1.12(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))':
     dependencies:
       '@vitest/spy': 4.1.12
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.3.5(jiti@2.7.0)
+      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)
 
   '@vitest/pretty-format@4.1.12':
     dependencies:
@@ -2504,7 +2533,9 @@ snapshots:
 
   uhyphen@0.2.0: {}
 
-  unimport@6.5.0(rolldown@1.2.15)(vite@8.3.5(jiti@2.7.0)):
+  undici-types@8.9.0: {}
+
+  unimport@6.5.0(rolldown@1.2.15)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)):
     dependencies:
       acorn: 8.19.0
       escape-string-regexp: 5.0.0
@@ -2518,7 +2549,7 @@ snapshots:
       scule: 1.3.0
       strip-literal: 4.0.0
       tinyglobby: 0.2.17
-      unplugin: 3.4.0(rolldown@1.2.15)(vite@8.3.5(jiti@2.7.0))
+      unplugin: 3.4.0(rolldown@1.2.15)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))
       unplugin-utils: 0.3.2
     optionalDependencies:
       rolldown: 1.2.15
@@ -2538,20 +2569,20 @@ snapshots:
       pathe: 2.0.3
       picomatch: 4.0.7
 
-  unplugin@3.4.0(rolldown@1.2.15)(vite@8.3.5(jiti@2.7.0)):
+  unplugin@3.4.0(rolldown@1.2.15)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)):
     dependencies:
       '@jridgewell/remapping': 2.3.5
       picomatch: 4.0.7
       webpack-virtual-modules: 0.6.2
     optionalDependencies:
       rolldown: 1.2.15
-      vite: 8.3.5(jiti@2.7.0)
+      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)
 
   uri-js@4.4.1:
     dependencies:
       punycode: 2.3.1
 
-  vite@8.3.5(jiti@2.7.0):
+  vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -2559,13 +2590,14 @@ snapshots:
       rolldown: 1.2.15
       tinyglobby: 0.2.17
     optionalDependencies:
+      '@types/node': 26.6.6
       fsevents: 2.3.3
       jiti: 2.7.0
 
-  vitest@4.1.12(vite@8.3.5(jiti@2.7.0)):
+  vitest@4.1.12(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)):
     dependencies:
       '@vitest/expect': 4.1.12
-      '@vitest/mocker': 4.1.12(vite@8.3.5(jiti@2.7.0))
+      '@vitest/mocker': 4.1.12(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))
       '@vitest/pretty-format': 4.1.12
       '@vitest/runner': 4.1.12
       '@vitest/snapshot': 4.1.12
@@ -2582,8 +2614,10 @@ snapshots:
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
       tinyrainbow: 3.2.0
-      vite: 8.3.5(jiti@2.7.0)
+      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)
       why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@types/node': 26.6.6
     transitivePeerDependencies:
       - msw
 
@@ -2616,7 +2650,7 @@ snapshots:
 
   ws@8.22.1: {}
 
-  wxt@0.21.4(eslint@10.13.0(jiti@2.7.0))(rolldown@1.2.15)(typescript@6.0.3)(vite@8.3.5(jiti@2.7.0)):
+  wxt@0.21.4(eslint@10.13.0(jiti@2.7.0))(rolldown@1.2.15)(typescript@6.0.3)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)):
     dependencies:
       '@1natsu/wait-element': 4.2.0
       '@aklinker1/rollup-plugin-visualizer': 5.12.0
@@ -2646,8 +2680,8 @@ snapshots:
       tiny-open: 1.3.0
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
-      unimport: 6.5.0(rolldown@1.2.15)(vite@8.3.5(jiti@2.7.0))
-      vite: 8.3.5(jiti@2.7.0)
+      unimport: 6.5.0(rolldown@1.2.15)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))
+      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)
     optionalDependencies:
       eslint: 10.13.0(jiti@2.7.0)
       typescript: 6.0.3

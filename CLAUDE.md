@@ -7,9 +7,9 @@ Detects the key and BPM of audio as it plays. A Rust analysis core runs natively
 - `crates/hunch-core`: DSP and models (key, tempo, listening windows). No IO.
 - `crates/hunch-wasm`: wasm-bindgen wrapper the extension loads.
 - `crates/hunch-eval`: native CLI that scores the core against datasets in `data/` (gitignored). Run `cargo run -p hunch-eval --release -- --help`.
-- `extension/`: WXT + TypeScript. Its build and browser commands run from `extension/`.
+- `extension/`: WXT + TypeScript. Its build commands run from `extension/`. `extension/browser/` holds the Hunch browser mixins and the test-beat page.
 - `packages/ui` (`@hunch/ui`): shared UI logic and components.
-- `packages/harness` (`@hunch/harness`): Chrome for Testing harness. Generic parts (installing Chrome for Testing, launching or attaching over DevTools with the endpoint recorded, console errors, the test-beat page) in `src/`; the extension driver (install, turn on, read session state) and CLI in `src/extension/`.
+- `packages/browser` (`@hunch/browser`): a generic dev browser for agents, with no Hunch knowledge. It handles Chrome for Testing, launching or attaching, unpacked extensions, the DevTools endpoint file, console output and mixins. TypeScript that Node runs directly by stripping types: no build step.
 - The repo root is a pnpm workspace (`extension`, `packages/*`) with one lockfile. Run `pnpm install` from the root.
 
 ## Checks (same as CI)
@@ -26,18 +26,19 @@ pnpm build:wasm && pnpm build     # builds extension/.output/chrome-mv3
 
 ## Running the extension in a browser
 
-`pnpm browser` launches Chrome for Testing with the built extension, opens the test-beat page (or `--url`), turns Hunch on for it, and prints the extension's session state for the tab (from `chrome.storage.session`) as it changes. It's headed unless `--headless` is passed, stays open until you close it (or `--seconds <n>`), and writes its DevTools endpoint to `.chrome/devtools-endpoint.txt` at the repo root. It never touches your own Chrome profile. The commands are thin calls into `@hunch/harness`'s `hunch-harness` CLI and work from `extension/` or the repo root.
+`pnpm browser` (the `hunch-browser` CLI) opens Chrome for Testing headed, loads unpacked extensions, opens a URL and runs an optional mixin. It stays open until the browser closes or `--seconds` run out. Run the commands from the repo root.
 
 ```sh
-pnpm browser:install          # once: downloads Chrome for Testing into .chrome at the repo root
-pnpm build:wasm && pnpm build # the harness runs the last build
-pnpm browser                  # headed, test beat, Hunch on, stays open
-pnpm browser:check            # headless plumbing check: the test beat reaches the analyzer, exit 1 if not
-pnpm browser --url <url>      # any page instead of the test beat
-pnpm browser --connect 9222   # attach to a running browser by port, http URL or ws endpoint
+pnpm browser install                 # once: downloads Chrome for Testing into .chrome at the repo root
+pnpm build:wasm && pnpm build        # in extension/: the mixins load the last build
+pnpm browser:extension               # headed: test beat, Hunch on, session state printed as it changes
+pnpm browser:check                   # headless plumbing check: exit 1 unless the beat reaches the analyzer
+pnpm browser --url https://example.com --extension extension/.output/chrome-mv3
 ```
 
-To look at or poke the UI, script standard Puppeteer against the open browser. Save the script in `packages/harness`, so it resolves `puppeteer-core`, and run it with `node` from there:
+Flags: `--url`, `--headless`, `--connect <port|http(s) URL|ws(s) endpoint>`, `--extension <dir>` (repeatable), `--seconds <n>`, `--window-size <w>x<h>`, `--devtools`, `--profile <dir>` (default: a fresh profile), `--mute`, `--console errors|all|none`, `--endpoint-file <path>`, `--chrome-arg <flag>` (repeatable), `--mixin <file>`. Flags override a mixin's defaults; see `pnpm browser --help`.
+
+While it runs, a launched browser's DevTools endpoint is in `.chrome/devtools-endpoint.txt`. To look at or poke the UI, script standard Puppeteer against it. Save the script in `packages/browser` so it resolves `puppeteer-core`, and run it with `node`:
 
 ```js
 import puppeteer from 'puppeteer-core';
@@ -51,12 +52,27 @@ console.log(await page.evaluate(() => document.title));
 await browser.disconnect(); // leaves the browser open
 ```
 
-- The harness knows nothing about the overlay's markup, so UI changes never need harness changes. Check UI headed: open it, take screenshots, and look at them. Model accuracy is tested against the core with `hunch-eval`, not through the browser.
-- `browser:check` passes when the tab's session has a window with estimates, a tempo near 120 BPM (or half or double), and no session or console errors. The key isn't judged.
-- It clicks the toolbar icon with Puppeteer's `triggerAction`, which counts as the user action tab capture needs.
-- The test page (120 BPM, A minor) plays through an `<audio>` element.
-  - Tab capture doesn't hear Web Audio contexts that were already running when capture started.
-- Audio plays through the speakers while it runs.
-  - Puppeteer's default `--mute-audio` also silences tab capture, so the harness turns it off.
-- `--connect` needs the browser started with `--enable-unsafe-extension-debugging` to install the extension. It opens its own tab and only detaches at the end. `openBrowser({ connect })` takes a WebView2 debug port the same way, for the desktop app later.
-- Branded Chrome ignores unpacked extensions loaded from the command line, so the harness uses Chrome for Testing.
+A mixin is a `.ts` or `.js` module that sets default options and drives the open browser. Paths in its options resolve from the mixin's folder. Returning a number exits with it; returning nothing stays open:
+
+```ts
+import { defineMixin } from '@hunch/browser';
+
+export default defineMixin({
+  options: { url: 'https://example.com', extensions: ['../.output/chrome-mv3'] },
+  async run({ page, extensions, log }) {
+    await extensions[0]?.handle.triggerAction(page);
+    log(await page.title());
+  },
+});
+```
+
+The context also has `browser`, `options`, `endpoint`, the console `errors` collected so far, a `signal` that aborts when the browser closes or time runs out, and `seconds`.
+
+- The Hunch mixins live in `extension/browser/`:
+  - `dev.ts`: the build on the test beat. It turns Hunch on and prints the tab's session state from `chrome.storage.session` until the browser closes.
+  - `check.ts`: headless for 12 s. It passes on a window with estimates, a tempo near 120 BPM (or half or double), and no session or console errors. The key isn't judged.
+- Check UI headed: open it, take screenshots, and look at them. Model accuracy is tested against the core with `hunch-eval`, not through the browser.
+- Branded Chrome ignores unpacked extensions loaded from the command line, so this uses Chrome for Testing. Extensions are installed after launch with `browser.installExtension`, because passing them to `launch` doesn't finish loading them. A toolbar click before the service worker runs is lost, so loading waits for it.
+- Audio isn't muted unless you pass `--mute`: muting Chrome also silences tab capture.
+- The test page (120 BPM, A minor) plays through an `<audio>` element. Tab capture doesn't hear Web Audio contexts that were already running when capture started.
+- `--connect` needs the browser started with `--enable-unsafe-extension-debugging` to install extensions. It opens its own tab and only detaches at the end. A WebView2 debug port works the same way, for the desktop app later.

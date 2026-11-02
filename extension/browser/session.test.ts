@@ -1,7 +1,8 @@
+import type { Estimate, SessionState, WindowState } from '@hunch/ui';
 import { describe, expect, it } from 'vitest';
-import { checkTestBeatSession, formatSession, latestEstimate } from './tab-session.mjs';
+import { checkTestBeatSession, formatSession, latestEstimate } from './session.ts';
 
-const estimate = {
+const estimate: Estimate = {
   key: 'A minor',
   keyConfidence: 0.8,
   bpm: 120.2,
@@ -11,14 +12,21 @@ const estimate = {
   secondsAnalyzed: 4,
 };
 
-const state = {
+const currentWindow: WindowState = {
+  windowId: 2,
+  startedAt: 0,
+  recentEstimates: [estimate],
+  hasEnded: false,
+};
+
+const state: SessionState = {
   tabId: 7,
-  window: { windowId: 2, startedAt: 0, recentEstimates: [estimate], hasEnded: false },
+  window: currentWindow,
   history: [],
   error: null,
 };
 
-const empty = { tabId: 7, window: null, history: [], error: null };
+const empty: SessionState = { tabId: 7, window: null, history: [], error: null };
 
 describe('latestEstimate', () => {
   it('prefers the current window', () => {
@@ -62,7 +70,7 @@ describe('checkTestBeatSession', () => {
 
   it('accepts half and double time and ignores the key', () => {
     const halfTime = { ...estimate, key: 'D minor', bpm: 60.4 };
-    const window = { ...state.window, recentEstimates: [halfTime] };
+    const window = { ...currentWindow, recentEstimates: [halfTime] };
     expect(checkTestBeatSession({ state: { ...state, window }, errors: [] })).toEqual([]);
   });
 
@@ -79,7 +87,7 @@ describe('checkTestBeatSession', () => {
   });
 
   it('fails on a tempo far from the test beat', () => {
-    const window = { ...state.window, recentEstimates: [{ ...estimate, bpm: 90 }] };
+    const window = { ...currentWindow, recentEstimates: [{ ...estimate, bpm: 90 }] };
     expect(checkTestBeatSession({ state: { ...state, window }, errors: [] })).toEqual([
       'bpm is 90.0, nowhere near 120',
     ]);

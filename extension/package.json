@@ -12,22 +12,21 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "wxt prepare && tsc --noEmit",
+    "typecheck": "wxt prepare && tsc --noEmit && tsc --noEmit -p browser",
     "test": "vitest run",
-    "build:wasm": "node scripts/build-wasm.mjs",
-    "browser": "hunch-harness extension",
-    "browser:install": "hunch-harness install",
-    "browser:check": "hunch-harness extension --check --headless"
+    "build:wasm": "node scripts/build-wasm.mjs"
   },
   "dependencies": {
     "@hunch/ui": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@hunch/harness": "workspace:*",
+    "@hunch/browser": "workspace:*",
+    "@types/node": "^26.0.0",
     "eslint": "^10.13.0",
     "globals": "^17.13.0",
     "prettier": "^3.9.10",
+    "puppeteer-core": "^25.16.0",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.0",
     "vitest": "^4.1.12",
