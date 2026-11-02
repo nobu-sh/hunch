@@ -3,7 +3,7 @@ use crate::rhythm::TempoDetector;
 use crate::tonal::KeyDetector;
 
 /// How much newly pushed audio, in seconds, is needed before the next estimate.
-const ESTIMATE_INTERVAL_SECONDS: u32 = 1;
+const ESTIMATE_INTERVAL_SECONDS: f32 = 0.5;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Estimate {
@@ -36,13 +36,14 @@ impl Analyzer {
             sample_rate,
             key: KeyDetector::new(sample_rate),
             tempo: TempoDetector::new(sample_rate),
-            samples_per_estimate: u64::from(sample_rate) * u64::from(ESTIMATE_INTERVAL_SECONDS),
+            samples_per_estimate: ((sample_rate as f32 * ESTIMATE_INTERVAL_SECONDS) as u64).max(1),
             total_samples: 0,
             samples_since_estimate: 0,
         }
     }
 
-    /// Mono f32 samples in [-1, 1]. Returns an estimate at most once per ~1 s of newly pushed audio.
+    /// Mono f32 samples in [-1, 1]. Returns an estimate at most once per `ESTIMATE_INTERVAL_SECONDS`
+    /// of newly pushed audio.
     pub fn push(&mut self, samples: &[f32]) -> Option<Estimate> {
         self.key.push(samples);
         self.tempo.push(samples);
@@ -100,23 +101,23 @@ mod tests {
     }
 
     #[test]
-    fn no_estimate_before_one_second() {
+    fn no_estimate_before_half_a_second() {
         let mut analyzer = Analyzer::new(SAMPLE_RATE);
         let chunk = silence(0.1);
-        for _ in 0..9 {
+        for _ in 0..4 {
             assert_eq!(analyzer.push(&chunk), None);
         }
     }
 
     #[test]
-    fn one_estimate_after_one_second() {
+    fn one_estimate_after_half_a_second() {
         let mut analyzer = Analyzer::new(SAMPLE_RATE);
         let chunk = silence(0.1);
-        let estimates: Vec<Estimate> = (0..15).filter_map(|_| analyzer.push(&chunk)).collect();
+        let estimates: Vec<Estimate> = (0..7).filter_map(|_| analyzer.push(&chunk)).collect();
 
         assert_eq!(estimates.len(), 1);
         let estimate = &estimates[0];
-        assert!((estimate.seconds_analyzed - 1.0).abs() < 1e-3);
+        assert!((estimate.seconds_analyzed - 0.5).abs() < 1e-3);
         assert_eq!(estimate.key, None);
         assert_eq!(estimate.bpm, None);
         assert_eq!(estimate.key_confidence, 0.0);
@@ -134,11 +135,11 @@ mod tests {
     #[test]
     fn reset_clears_progress() {
         let mut analyzer = Analyzer::new(SAMPLE_RATE);
-        analyzer.push(&silence(0.9));
+        analyzer.push(&silence(0.4));
         analyzer.reset();
-        assert_eq!(analyzer.push(&silence(0.5)), None);
+        assert_eq!(analyzer.push(&silence(0.2)), None);
 
-        let estimate = analyzer.push(&silence(0.5)).expect("estimate after 1 s");
-        assert!((estimate.seconds_analyzed - 1.0).abs() < 1e-3);
+        let estimate = analyzer.push(&silence(0.3)).expect("estimate after 0.5 s");
+        assert!((estimate.seconds_analyzed - 0.5).abs() < 1e-3);
     }
 }

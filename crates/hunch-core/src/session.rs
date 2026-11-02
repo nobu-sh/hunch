@@ -13,7 +13,7 @@ pub enum SessionEvent {
         window_id: u32,
         at_seconds: f32,
     },
-    /// Sent about once per second of window audio.
+    /// Sent about twice per second of window audio.
     Estimate {
         window_id: u32,
         estimate: Estimate,

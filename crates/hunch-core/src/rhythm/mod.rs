@@ -18,8 +18,9 @@ use self::onset::{Band, OnsetEnvelopes};
 use self::periodicity::{LagRange, Period, bpm_to_lag, lag_to_bpm, strongest_periods};
 use self::repetition::{Repetition, RepetitionFinder};
 
-/// Audio needed before the first estimate.
-const MIN_SECONDS: f32 = 4.0;
+/// Audio needed before the first estimate. Early estimates are rough, but their confidence still
+/// tracks accuracy, so the lock decides when to trust them.
+const MIN_SECONDS: f32 = 2.0;
 /// Range the seed periods are searched in. Every tempo in the candidate range has an octave
 /// relative in here, so the right family is found as long as its period is a peak.
 const SEARCH_MIN_BPM: f32 = 60.0;
