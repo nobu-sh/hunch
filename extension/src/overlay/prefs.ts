@@ -1,5 +1,5 @@
 import { browser } from 'wxt/browser';
-import { DEFAULT_POSITION, type OverlayPosition } from '@/lib/overlay-position';
+import { DEFAULT_POSITION, type OverlayPosition } from '@hunch/ui';
 
 const POSITION_KEY = 'overlayPosition';
 const COLLAPSED_KEY = 'overlayCollapsed';

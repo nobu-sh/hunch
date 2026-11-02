@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampPoint, pointToPosition, positionToPoint } from './overlay-position';
+import { clampPoint, pointToPosition, positionToPoint } from './position';
 
 const VIEWPORT = { width: 1000, height: 800 };
 const PANEL = { width: 300, height: 200 };
