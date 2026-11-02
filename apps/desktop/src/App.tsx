@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
   applySourceStatus,
   createSessionState,
@@ -13,19 +14,23 @@ import {
 import {
   Notice,
   Overlay,
+  PinButton,
   SourcePicker,
   SourcesButton,
   useSourcePicker,
   type CloseLabels,
 } from '@hunch/ui/components';
 import { backend } from './backend';
+import { anchorWindowTo, type WindowAnchor } from './placement';
 import { followSession } from './session';
+import { useAlwaysOnTop } from './use-always-on-top';
 import { useSubscription } from './use-subscription';
-import { closeWindow, dragWindowFrom, fitWindowTo } from './window';
+import { dragWindowFrom } from './window';
 
 /** The app listens to one source at a time, so its session needs no real id yet. */
 const SESSION_ID = 0;
-const QUIT_LABELS: CloseLabels = { label: 'Quit', title: 'Quit Hunch' };
+// The tray menu quits, so closing only hides the window and its session keeps running.
+const HIDE_LABELS: CloseLabels = { label: 'Hide', title: 'Hide to tray' };
 
 async function copyToClipboard(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
@@ -59,11 +64,29 @@ export function App() {
     setState((current) => applySourceStatus({ state: current, sourceState: next.state }));
   };
   useSubscription({ subscribe: () => backend.onSourceStatus(followStatus), onError: showError });
+  const alwaysOnTop = useAlwaysOnTop(showError);
 
+  const anchorRef = useRef<WindowAnchor | null>(null);
   useEffect(() => {
     if (rootRef.current === null) return;
-    return fitWindowTo(rootRef.current);
+    const anchor = anchorWindowTo(rootRef.current);
+    anchorRef.current = anchor;
+    return () => {
+      anchor.stop();
+      anchorRef.current = null;
+    };
   }, []);
+  // The panel and pill differ most in size, so swapping them is resized out of sight.
+  const setCollapsed = (collapsed: boolean) => {
+    const render = () => {
+      flushSync(() => {
+        setIsCollapsed(collapsed);
+      });
+    };
+    const anchor = anchorRef.current;
+    if (anchor === null) render();
+    else anchor.resizeOutOfSight(render).catch(showError);
+  };
 
   const statusSource = picker.current?.id === status?.sourceId ? picker.current : null;
   const notice = status && sourceNotice({ status, source: statusSource });
@@ -74,21 +97,26 @@ export function App() {
         view={overlayView(state)}
         isCollapsed={isCollapsed}
         onCollapse={() => {
-          setIsCollapsed(true);
+          setCollapsed(true);
         }}
         onExpand={() => {
-          setIsCollapsed(false);
+          setCollapsed(false);
         }}
-        onClose={closeWindow}
-        closeLabels={QUIT_LABELS}
+        onClose={() => {
+          backend.hideToTray().catch(showError);
+        }}
+        closeLabels={HIDE_LABELS}
         onCopy={copyToClipboard}
         headerRef={dragWindowFrom}
         pillRef={dragWindowFrom}
         headerActions={
-          <SourcesButton
-            isOpen={picker.isOpen}
-            onClick={picker.isOpen ? picker.close : picker.open}
-          />
+          <>
+            <PinButton isPinned={alwaysOnTop.isOnTop} onToggle={alwaysOnTop.setOnTop} />
+            <SourcesButton
+              isOpen={picker.isOpen}
+              onClick={picker.isOpen ? picker.close : picker.open}
+            />
+          </>
         }
         notice={
           notice && (

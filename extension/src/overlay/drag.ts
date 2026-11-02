@@ -1,4 +1,4 @@
-import type { Point } from '@/lib/overlay-position';
+import type { Point } from '@hunch/ui';
 
 /** Pointer travel that turns a press into a drag rather than a click. */
 const DRAG_THRESHOLD_PX = 4;

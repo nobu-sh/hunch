@@ -1,7 +1,17 @@
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { browser } from 'wxt/browser';
-import { overlayView, type OverlayView, type SessionState } from '@hunch/ui';
+import {
+  clampPoint,
+  overlayView,
+  pointToPosition,
+  positionToPoint,
+  type OverlayPosition,
+  type OverlayView,
+  type Point,
+  type SessionState,
+  type Size,
+} from '@hunch/ui';
 import { Overlay } from '@hunch/ui/components';
 import OVERLAY_CSS from '@hunch/ui/overlay.css?inline';
 import {
@@ -9,14 +19,6 @@ import {
   type OverlayCloseRequest,
   type OverlayHelloRequest,
 } from '@/lib/messages';
-import {
-  pointToPosition,
-  positionToPoint,
-  clampPoint,
-  type OverlayPosition,
-  type Point,
-  type Size,
-} from '@/lib/overlay-position';
 import { makeDraggable } from './drag';
 import { loadOverlayPrefs, saveCollapsed, savePosition } from './prefs';
 

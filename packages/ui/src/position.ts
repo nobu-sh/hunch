@@ -64,3 +64,20 @@ export function pointToPosition(params: {
     offsetY: isBottom ? viewport.height - panel.height - point.top : point.top,
   };
 }
+
+/** A rectangle that a panel is placed in, such as a monitor's work area. */
+export interface Area extends Point, Size {}
+
+/** Top-left of a panel for a stored position, relative to `area` and clamped into it. */
+export function placeInArea(params: { position: OverlayPosition; panel: Size; area: Area }): Point {
+  const { position, panel, area } = params;
+  const point = positionToPoint({ position, panel, viewport: area });
+  return { left: area.left + point.left, top: area.top + point.top };
+}
+
+/** Anchors a panel at `point` to the corner of `area` nearest its center. */
+export function anchorInArea(params: { point: Point; panel: Size; area: Area }): OverlayPosition {
+  const { point, panel, area } = params;
+  const pointInArea = { left: point.left - area.left, top: point.top - area.top };
+  return pointToPosition({ point: pointInArea, panel, viewport: area });
+}

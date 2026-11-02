@@ -13,6 +13,14 @@ tauri-build = { version = "2", features = [] }
 hunch-capture.workspace = true
 hunch-core = { workspace = true, features = ["serde"] }
 # Pinned to 2.11: 2.12 needs rustc 1.90. Keep @tauri-apps/api and cli on the same minor.
-tauri = { version = "~2.11", features = [] }
+tauri = { version = "~2.11", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_WindowsAndMessaging",
+] }
