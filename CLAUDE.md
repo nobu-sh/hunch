@@ -6,6 +6,7 @@ Detects the key and BPM of audio as it plays. A Rust analysis core runs natively
 
 - `crates/hunch-core`: DSP and models (key, tempo, listening windows). No IO.
 - `crates/hunch-wasm`: wasm-bindgen wrapper the extension loads.
+- `crates/hunch-capture`: audio capture for the desktop app. It has a platform-independent `AudioBackend` trait and source model, converts audio to mono 22,050 Hz chunks, and has a WASAPI backend in `platform/windows` (other platforms get a stub). Its CLI lists sources and prints live session events: `cargo run -p hunch-capture --release -- list`, then `listen <id> [--seconds n]`.
 - `crates/hunch-eval`: native CLI that scores the core against datasets in `data/` (gitignored). Run `cargo run -p hunch-eval --release -- --help`.
 - `extension/`: WXT + TypeScript. Its build commands run from `extension/`. `extension/dev/` holds the dev-only Hunch browser mixins and the test-beat page.
 - `packages/ui` (`@hunch/ui`): shared UI logic and components.
