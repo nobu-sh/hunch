@@ -32,7 +32,7 @@ On Linux, building `apps/desktop/src-tauri` needs Tauri's system packages; CI in
 
 ```sh
 pnpm desktop:dev      # opens the app: Vite dev server + tauri dev, WebView2 debug port 9230
-pnpm desktop:build    # release build: target/release/hunch-desktop.exe (no installer yet)
+pnpm desktop:build    # release build: target/release/hunch-desktop.exe and the installer in target/release/bundle/nsis/
 pnpm browser:desktop  # with desktop:dev running: attach to the app's page and print its key and BPM
 ```
 
@@ -41,6 +41,9 @@ pnpm browser:desktop  # with desktop:dev running: attach to the app's page and p
 - Commands: `list_sources` (`{ sources, listsApps }`), `select_source { id }` (fresh session on that source, remembered), `current_source`, `listen`. `source-status` is `{ sourceId, state: listening | ended | silent | failed, message }`; `silent` means an app or output device gave only digital silence for 15 s. When a source ends or is replaced, its open window is finished first: its last `session-event`s, ending in `windowEnded`, come before `ended`/`failed` or the next source's `listening`.
 - Debug builds list a dev source, `dev:test-beat` (120 BPM, A minor, synthesized). `HUNCH_DEV_SOURCE=test-beat pnpm desktop:dev` makes `listen` start it.
 - Tauri is pinned to 2.11 (crate and npm) because 2.12 needs rustc 1.90.
+- The installer is an unsigned, per-user NSIS setup (`Hunch_<version>_x64-setup.exe`, no admin prompt). It installs silently with `/S /D=<dir>`, and `uninstall.exe /S` removes it.
+- `.github/workflows/desktop-release.yml` builds the installer on `windows-latest` and uploads it as the `hunch-windows-installer` artifact. It runs on manual dispatch, `desktop-v*` tags, and pull requests that change the workflow.
+- The icon source is `apps/desktop/icons-src/icon.svg`. To change it, render a 1024 px PNG and run `pnpm --filter hunch-desktop tauri icon <png>`, then delete the outputs Windows doesn't use (`android/`, `ios/`, `icon.icns`, `Square*`, `StoreLogo.png`, `64x64.png`).
 
 ## Running the extension in a browser
 
