@@ -7,7 +7,8 @@ Detects the key and BPM of audio as it plays. A Rust analysis core runs natively
 - `crates/hunch-core`: DSP and models (key, tempo, listening windows). No IO.
 - `crates/hunch-wasm`: wasm-bindgen wrapper the extension loads.
 - `crates/hunch-eval`: native CLI that scores the core against datasets in `data/` (gitignored). Run `cargo run -p hunch-eval --release -- --help`.
-- `extension/`: WXT + TypeScript. Its pnpm commands run from `extension/`.
+- `extension/`: WXT + TypeScript. Its build and browser commands run from `extension/`.
+- The repo root is a pnpm workspace (`extension`, `packages/*`) with one lockfile. Run `pnpm install` from the root.
 
 ## Checks (same as CI)
 
@@ -15,8 +16,9 @@ Detects the key and BPM of audio as it plays. A Rust analysis core runs natively
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+pnpm install --frozen-lockfile
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm test   # every workspace package
 # in extension/
-pnpm lint && pnpm format:check && pnpm typecheck && pnpm test
 pnpm build:wasm && pnpm build     # builds extension/.output/chrome-mv3
 ```
 

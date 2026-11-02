@@ -6,7 +6,9 @@ settings:
 
 importers:
 
-  .:
+  .: {}
+
+  extension:
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
