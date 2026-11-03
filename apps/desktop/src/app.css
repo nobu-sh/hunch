@@ -27,14 +27,19 @@ body {
 
 /*
  * The window has a native acrylic blur behind it, and on Windows 11 the system rounds its corners
- * and draws its border and shadow. So the panel tints the blur instead of standing alone, and
- * leaves the edge to the window: a CSS border or radius would show a second edge inside it.
+ * and draws its border and shadow. The page tints the blur rather than the panel: the page is
+ * always exactly the window's size, while the panel can fall a fraction of a pixel short of it and
+ * leave untinted blur along an edge. A CSS border or radius would show a second edge inside the
+ * window's own.
  */
 :root {
-  --bg: rgba(18, 18, 22, 0.72);
+  --bg: rgba(18, 18, 22, 0.6);
+  background: var(--bg);
 }
 .panel,
-.pill {
+.pill,
+.pill:hover {
+  background: transparent;
   border: none;
   border-radius: 0;
   box-shadow: none;
