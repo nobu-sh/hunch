@@ -33,7 +33,7 @@ body {
  * window's own.
  */
 :root {
-  --bg: rgba(18, 18, 22, 0.72);
+  --bg: rgba(18, 18, 22, 0.6);
   background: var(--bg);
 }
 .panel,
