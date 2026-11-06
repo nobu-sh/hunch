@@ -310,6 +310,14 @@ fn repeated(chords: &Progression, times: usize) -> Vec<f32> {
     progression(chords, 0.0).repeat(times)
 }
 
+fn keeping_everything() -> KeyDetector {
+    let config = KeyDetectorConfig {
+        forget_seconds: None,
+        ..KeyDetectorConfig::default()
+    };
+    KeyDetector::with_config(SAMPLE_RATE, config)
+}
+
 #[test]
 fn forgetting_lets_a_new_key_take_over() {
     // 36 s of C major, then 12 s of F# major (no shared notes).
@@ -318,7 +326,7 @@ fn forgetting_lets_a_new_key_take_over() {
         forget_seconds: Some(3.0),
         ..KeyDetectorConfig::default()
     };
-    let mut keeping = KeyDetector::new(SAMPLE_RATE);
+    let mut keeping = keeping_everything();
     let mut forgetful = KeyDetector::with_config(SAMPLE_RATE, forgetting);
     keeping.push(&audio);
     forgetful.push(&audio);
@@ -333,7 +341,7 @@ fn forgetting_bounds_the_evidence_to_its_time_constant() {
         forget_seconds: Some(forget_seconds),
         ..KeyDetectorConfig::default()
     };
-    let mut keeping = KeyDetector::new(SAMPLE_RATE);
+    let mut keeping = keeping_everything();
     let mut forgetful = KeyDetector::with_config(SAMPLE_RATE, forgetting);
     let audio = repeated(C_MAJOR, 3);
     keeping.push(&audio);
@@ -347,7 +355,6 @@ fn forgetting_bounds_the_evidence_to_its_time_constant() {
 #[test]
 fn tracking_blocks_leaves_estimates_unchanged() {
     let config = KeyDetectorConfig {
-        forget_seconds: None,
         track_blocks: true,
         ..KeyDetectorConfig::default()
     };

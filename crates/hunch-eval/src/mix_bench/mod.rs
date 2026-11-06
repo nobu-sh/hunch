@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::Args;
-use hunch_core::tonal::KeyDetectorConfig;
+use hunch_core::tonal::{DEFAULT_FORGET_SECONDS, KeyDetectorConfig};
 use hunch_core::{Analyzer, Estimate};
 use rayon::prelude::*;
 
@@ -37,8 +37,6 @@ const AFTER_CHANGE_SECONDS: [f32; 5] = [5.0, 10.0, 20.0, 30.0, 45.0];
 /// Single tracks are scored at these times.
 const SINGLE_TRACK_SECONDS: [f32; 4] = [30.0, 60.0, 90.0, 115.0];
 const FORGET_SECONDS: [f32; 4] = [30.0, 45.0, 60.0, 90.0];
-/// Forgetting paired with each pick's splits in the downstream tables.
-const COMBINED_FORGET_SECONDS: f32 = 30.0;
 /// False-split budgets the per-category table reports the best recall at.
 const BUDGETS: [f32; 4] = [0.25, 0.5, 1.0, 2.0];
 
@@ -662,9 +660,9 @@ struct SplitVariant {
     key_config: KeyDetectorConfig,
 }
 
-/// Every pick keeping all key evidence, then with key forgetting on top.
+/// Every pick keeping all key evidence, then with the default key forgetting on top.
 fn split_variants(input: &DownstreamInput) -> Vec<SplitVariant> {
-    let forgetting = key_config(Some(COMBINED_FORGET_SECONDS));
+    let forgetting = key_config(Some(DEFAULT_FORGET_SECONDS));
     let plain = input.picks.iter().map(|&pick| SplitVariant {
         name: input.configs[pick].0.clone(),
         pick,
@@ -672,7 +670,7 @@ fn split_variants(input: &DownstreamInput) -> Vec<SplitVariant> {
     });
     let combined = input.picks.iter().map(|&pick| SplitVariant {
         name: format!(
-            "{} + forget {COMBINED_FORGET_SECONDS:.0}s",
+            "{} + forget {DEFAULT_FORGET_SECONDS:.0}s",
             input.configs[pick].0
         ),
         pick,
