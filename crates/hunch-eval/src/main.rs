@@ -8,6 +8,7 @@ mod key_sweep;
 mod keydata;
 mod keys;
 mod metrics;
+mod mix_bench;
 mod octave;
 mod profile_fit;
 mod report;
@@ -59,6 +60,8 @@ enum Command {
     Keys(keys::KeysArgs),
     /// Dump every estimate plus key detector inputs per sound, for one split.
     Timeline(timeline::TimelineArgs),
+    /// Experimental: score track-change detectors on synthetic Beatport mixes.
+    MixBench(Box<mix_bench::MixBenchArgs>),
 }
 
 #[derive(Args)]
@@ -185,6 +188,7 @@ fn main() -> ExitCode {
         Command::KeySweep(args) => key_sweep::run(&args),
         Command::Keys(args) => keys::run(&args),
         Command::Timeline(args) => timeline::run(&args),
+        Command::MixBench(args) => mix_bench::run(&args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

@@ -16,7 +16,7 @@ use crate::{DEFAULT_DATA_DIR, SplitChoice, decode, run};
 
 /// FSL10K loops are repeated to this length; tracks are cut to the listening window.
 const LISTEN_SECONDS: f32 = 30.0;
-const BEATPORT_META_DIR: &str = "meta";
+pub(crate) const BEATPORT_META_DIR: &str = "meta";
 const PITCH_CLASSES: usize = 12;
 
 #[derive(Args)]
@@ -126,7 +126,7 @@ fn beatport_items(data_dir: &Path, split: SplitChoice) -> Result<Vec<Item>, Stri
 }
 
 /// The BPM Beatport lists for `track`, from its `meta/<audio stem>.json`. About half have one.
-fn store_bpm(meta_dir: &Path, track: &Track) -> Option<f32> {
+pub(crate) fn store_bpm(meta_dir: &Path, track: &Track) -> Option<f32> {
     let stem = track.audio_path.file_stem()?.to_str()?;
     let text = fs::read_to_string(meta_dir.join(format!("{stem}.json"))).ok()?;
     let meta: serde_json::Value = serde_json::from_str(&text).ok()?;
