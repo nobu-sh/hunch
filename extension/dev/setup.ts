@@ -1,8 +1,8 @@
 // What both Hunch mixins do: play the test beat, turn Hunch on, and follow the tab's session.
 import type { LoadedExtension, MixinContext } from '@hunch/browser';
 import type { SessionState } from '@hunch/ui';
+import { formatSession } from '@hunch/ui/dev';
 import { TargetType, type WebWorker } from 'puppeteer-core';
-import { formatSession } from './session.ts';
 import { type TestBeatServer, waitForTestBeat } from './test-beat.ts';
 
 /** The unpacked build, relative to this folder. */

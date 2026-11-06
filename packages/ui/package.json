@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./components": "./src/components/index.ts",
+    "./dev": "./src/dev.ts",
     "./overlay.css": "./src/styles/overlay.css"
   },
   "scripts": {

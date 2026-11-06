@@ -1,6 +1,6 @@
 import type { Estimate, SessionState, WindowState } from '@hunch/ui';
 import { describe, expect, it } from 'vitest';
-import { checkTestBeatSession, formatSession, latestEstimate } from './session.ts';
+import { checkTestBeatSession } from './session.ts';
 
 const estimate: Estimate = {
   key: 'A minor',
@@ -27,41 +27,6 @@ const state: SessionState = {
 };
 
 const empty: SessionState = { tabId: 7, window: null, history: [], error: null };
-
-describe('latestEstimate', () => {
-  it('prefers the current window', () => {
-    expect(latestEstimate(state)).toBe(estimate);
-  });
-
-  it('falls back to the newest finished window', () => {
-    const finished = { ...estimate, bpm: 60 };
-    const history = [{ windowId: 1, endedAt: 0, durationSeconds: 5, estimate: finished }];
-    expect(latestEstimate({ ...empty, history })).toBe(finished);
-  });
-
-  it('is null without any estimate', () => {
-    expect(latestEstimate(empty)).toBeNull();
-    expect(latestEstimate(null)).toBeNull();
-  });
-});
-
-describe('formatSession', () => {
-  it('summarizes the window and the latest estimate', () => {
-    expect(formatSession(state)).toBe(
-      'window 2 (1 estimates) | key A minor | bpm 120.2 | history 0',
-    );
-  });
-
-  it('dashes missing values and shows errors', () => {
-    expect(formatSession({ ...empty, error: 'capture ended' })).toBe(
-      'no window | key — | bpm — | history 0 | error capture ended',
-    );
-  });
-
-  it('says when there is no state', () => {
-    expect(formatSession(null)).toBe('no session state');
-  });
-});
 
 describe('checkTestBeatSession', () => {
   it('passes a window with estimates near the test tempo', () => {
