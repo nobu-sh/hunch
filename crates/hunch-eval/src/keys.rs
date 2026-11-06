@@ -1,5 +1,6 @@
 //! `keys`: the default key detector's metrics per dataset and listening window.
 
+use std::fmt;
 use std::time::Instant;
 
 use clap::Args;
@@ -23,9 +24,45 @@ pub struct KeysArgs {
     #[arg(long, value_enum, value_delimiter = ',', default_values_t = [Window::ThirtySeconds, Window::Full])]
     windows: Vec<Window>,
 
+    /// Key-evidence time constants to score, comma-separated: seconds or `off`. Defaults to the
+    /// detector's own.
+    #[arg(long, value_delimiter = ',', value_parser = parse_forget)]
+    forget: Vec<Forget>,
+
     /// Only decode the selected audio and count what loads; no predictions.
     #[arg(long)]
     decode_only: bool,
+}
+
+/// A `KeyDetectorConfig::forget_seconds` setting; `None` keeps all evidence.
+#[derive(Clone, Copy)]
+struct Forget(Option<f32>);
+
+impl fmt::Display for Forget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(seconds) => write!(formatter, "{seconds}s"),
+            None => write!(formatter, "off"),
+        }
+    }
+}
+
+fn parse_forget(text: &str) -> Result<Forget, String> {
+    if text == "off" {
+        return Ok(Forget(None));
+    }
+    match text.parse::<f32>() {
+        Ok(seconds) if seconds > 0.0 => Ok(Forget(Some(seconds))),
+        _ => Err(format!("expected `off` or positive seconds, got `{text}`")),
+    }
+}
+
+/// One table row: a dataset and window scored with one forgetting setting.
+struct Row<'a> {
+    corpus: Corpus,
+    window: &'a str,
+    forget: Forget,
+    config_index: usize,
 }
 
 pub fn run(args: &KeysArgs) -> Result<(), String> {
@@ -37,9 +74,10 @@ pub fn run(args: &KeysArgs) -> Result<(), String> {
     }
 
     println!(
-        "\n{:<10} {:<5} {:>5} {:>6} {:>6} {:>6} {:>6} | {:>6} {:>6} | {:>6} {:>6} | {:>13}",
+        "\n{:<10} {:<5} {:>6} {:>5} {:>6} {:>6} {:>6} {:>6} | {:>6} {:>6} | {:>6} {:>6} | {:>13}",
         "dataset",
         "win",
+        "forget",
         "keyed",
         "cov",
         "exact",
@@ -51,7 +89,19 @@ pub fn run(args: &KeysArgs) -> Result<(), String> {
         "ece-rw",
         "conf ok/wrong"
     );
-    let config = [KeyDetectorConfig::default()];
+    let default_forget = [Forget(KeyDetectorConfig::default().forget_seconds)];
+    let forgets = if args.forget.is_empty() {
+        &default_forget[..]
+    } else {
+        &args.forget[..]
+    };
+    let configs: Vec<KeyDetectorConfig> = forgets
+        .iter()
+        .map(|forget| KeyDetectorConfig {
+            forget_seconds: forget.0,
+            ..KeyDetectorConfig::default()
+        })
+        .collect();
     for (index, &window) in args.windows.iter().enumerate() {
         // Loops ignore the window, so only the first pass scores them.
         let selected: Vec<KeyItem> = items
@@ -59,13 +109,22 @@ pub fn run(args: &KeysArgs) -> Result<(), String> {
             .filter(|item| index == 0 || item.corpus != Corpus::Fsl10k)
             .cloned()
             .collect();
-        let scored = key_sweep::analyze_items(&selected, window, args.corpus.min_seconds, &config);
+        let scored = key_sweep::analyze_items(&selected, window, args.corpus.min_seconds, &configs);
         for corpus in key_sweep::corpora(&scored) {
             let window_name = match corpus {
                 Corpus::Fsl10k => format!("{}s", args.corpus.min_seconds),
                 Corpus::Beatport | Corpus::Giantsteps => window.to_string(),
             };
-            print_row(corpus, &window_name, &key_sweep::subset(&scored, corpus));
+            let subset = key_sweep::subset(&scored, corpus);
+            for (config_index, &forget) in forgets.iter().enumerate() {
+                let row = Row {
+                    corpus,
+                    window: &window_name,
+                    forget,
+                    config_index,
+                };
+                print_row(&row, &subset);
+            }
         }
     }
 
@@ -76,13 +135,14 @@ pub fn run(args: &KeysArgs) -> Result<(), String> {
     Ok(())
 }
 
-fn print_row(corpus: Corpus, window: &str, scored: &[&Scored]) {
+fn print_row(row_spec: &Row, scored: &[&Scored]) {
+    let config_index = row_spec.config_index;
     // Keys are already gated by the detector's own presence threshold.
-    let row = key_sweep::score_row(scored, 0, 0.0);
+    let row = key_sweep::score_row(scored, config_index, 0.0);
     let keyed_points: Vec<(f64, bool, f64)> = scored
         .iter()
         .filter_map(|entry| {
-            let outcome = &entry.result.outcomes[0];
+            let outcome = &entry.result.outcomes[config_index];
             let key = outcome.key?;
             let is_correct = metrics::is_same_scale_as_any(key, entry.labels()?);
             Some((f64::from(outcome.confidence), is_correct, 1.0))
@@ -92,7 +152,7 @@ fn print_row(corpus: Corpus, window: &str, scored: &[&Scored]) {
         .iter()
         .filter(|entry| entry.is_atonal())
         .filter_map(|entry| {
-            let outcome = &entry.result.outcomes[0];
+            let outcome = &entry.result.outcomes[config_index];
             outcome.key.map(|_| f64::from(outcome.confidence))
         })
         .collect();
@@ -106,9 +166,10 @@ fn print_row(corpus: Corpus, window: &str, scored: &[&Scored]) {
         (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
     };
     println!(
-        "{:<10} {:<5} {:>5} {:>6} {:>6} {:>6} {:>6} | {:>6} {:>6} | {:>6} {:>6} | {:>6}/{:<6}",
-        corpus.to_string(),
-        window,
+        "{:<10} {:<5} {:>6} {:>5} {:>6} {:>6} {:>6} {:>6} | {:>6} {:>6} | {:>6} {:>6} | {:>6}/{:<6}",
+        row_spec.corpus.to_string(),
+        row_spec.window,
+        row_spec.forget.to_string(),
         row.key.sounds,
         pct(row.key.coverage),
         pct(row.key.exact),

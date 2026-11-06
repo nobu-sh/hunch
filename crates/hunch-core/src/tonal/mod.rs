@@ -54,7 +54,12 @@ const GATE_CLARITY_WEIGHT: f32 = 4.198;
 const EVIDENCE_TIME_CONSTANT_SECONDS: f32 = 2.0;
 /// Score lead a new key needs over the held one before it replaces it. Picked on validation
 /// timelines (`hunch-eval timeline`): halves how often the shown key changes at equal accuracy.
+/// Scores come from faded evidence, so a new key takes over once the last minute or so favors it.
 const HOLD_MARGIN: f32 = 0.06;
+/// Default `forget_seconds`. Picked on validation with `hunch-eval mix-bench` and `keys`: the key
+/// recovers after a track change (same scale 30 s in, 28% → 35%) without costing single tracks at
+/// two minutes; 30 and 45 s recover faster but lose points late in a track.
+pub const DEFAULT_FORGET_SECONDS: f32 = 60.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeyEstimate {
@@ -101,8 +106,8 @@ pub struct KeyDetectorConfig {
     pub harmonicity_exponent: f32,
     /// Peaks count as `ln(1 + magnitude_compression · magnitude)`, 1.0 magnitude = full-scale sine.
     pub magnitude_compression: f32,
-    /// Experimental, off by default: evidence fades with this exponential time constant instead of
-    /// accumulating for the whole window, so a new key can take over. `None` keeps everything.
+    /// Evidence fades with this exponential time constant instead of accumulating for the whole
+    /// window, so a new key can take over after a track change. `None` keeps everything.
     pub forget_seconds: Option<f32>,
     /// Experimental, for `hunch-eval mix-bench`: also tally evidence per block, read and cleared by
     /// `KeyDetector::take_block`. Doesn't change estimates.
@@ -123,13 +128,14 @@ impl Default for KeyDetectorConfig {
             overtone_weight: 0.3,
             harmonicity_exponent: 1.0,
             magnitude_compression: 100.0,
-            forget_seconds: None,
+            forget_seconds: Some(DEFAULT_FORGET_SECONDS),
             track_blocks: false,
         }
     }
 }
 
-/// Streaming key detector. Accumulates evidence over everything pushed since the last reset.
+/// Streaming key detector. Accumulates evidence pushed since the last reset, fading older evidence
+/// with `forget_seconds`.
 pub struct KeyDetector {
     config: KeyDetectorConfig,
     stft: Stft,
