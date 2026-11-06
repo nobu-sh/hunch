@@ -479,3 +479,36 @@ fn finish_after_a_split_ends_the_new_window() {
     );
     assert_analyzed_whole_window(&windows[1]);
 }
+
+/// 120 BPM fading into 90 BPM over a minute, then silence.
+fn slow_crossfade() -> Vec<f32> {
+    const SECONDS: f32 = 60.0;
+    let (old, new) = (beat(120.0, SECONDS), beat(90.0, SECONDS));
+    let length = old.len() as f32;
+    let mut signal: Vec<f32> = old
+        .iter()
+        .zip(&new)
+        .enumerate()
+        .map(|(index, (old, new))| {
+            let gain = index as f32 / length;
+            (1.0 - gain) * old + gain * new
+        })
+        .collect();
+    signal.extend(silence(2.0));
+    signal
+}
+
+#[test]
+fn a_slow_crossfade_splits_once() {
+    let windows = ended_windows(&run(&slow_crossfade(), 2_205));
+
+    let durations: Vec<f32> = windows
+        .iter()
+        .map(|window| window.duration_seconds)
+        .collect();
+    assert_eq!(windows.len(), 2, "window durations {durations:?}");
+    assert_eq!(
+        reasons(&windows[1]),
+        (WindowStartReason::Change, Some(WindowEndReason::Silence))
+    );
+}
