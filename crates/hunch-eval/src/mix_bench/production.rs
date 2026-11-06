@@ -1,9 +1,8 @@
-//! The production change detector (`hunch_core::ChangeDetector`), run the way a session runs it:
-//! one analyzer per window, and on a change the window ends at the change point and a fresh
-//! analyzer re-analyzes the audio from there. It can't replay a trace, because a split restarts
-//! the analyzer, so it runs on the clip's audio.
+//! The production change detector, run through the production `hunch_core::Session`: its splits are
+//! the windows it ends on a tempo change. It can't replay a trace, because a split restarts the
+//! analyzer, so it runs on the clip's audio.
 
-use hunch_core::{Analyzer, ChangeDetector, Observation};
+use hunch_core::{Session, SessionEvent, WindowEndReason};
 
 use super::detect::{Cause, Split};
 use super::trace::TICK_SECONDS;
@@ -15,38 +14,29 @@ pub const CONFIG: &str = "core";
 
 pub fn splits(samples: &[f32]) -> Vec<Split> {
     let rate = ANALYSIS_SAMPLE_RATE as f32;
-    let mut analyzer = Analyzer::new(ANALYSIS_SAMPLE_RATE);
-    let mut detector = ChangeDetector::new();
+    let mut session = Session::new(ANALYSIS_SAMPLE_RATE);
     let mut splits = Vec::new();
-    let mut window_start = 0;
-    // The next sample to analyze, and the furthest one heard: a change found while re-analyzing
-    // is detected at the live position.
-    let mut position = 0;
-    let mut live = 0;
-    while position < samples.len() {
-        let end = (position + run::chunk_len()).min(samples.len());
-        let chunk = &samples[position..end];
-        position = end;
-        live = live.max(end);
-        let Some(estimate) = analyzer.push(chunk) else {
-            continue;
-        };
-        let observation = Observation {
-            analyzer: &analyzer,
-            estimate: &estimate,
-        };
-        let Some(change) = detector.update(observation) else {
-            continue;
-        };
-        let change_sample = window_start + (change.at_seconds * rate).round() as usize;
-        splits.push(Split {
-            detect_tick: tick_at(live as f32 / rate),
-            change_tick: tick_at(change_sample as f32 / rate),
-            cause: Cause::Tempo,
-        });
-        analyzer.reset();
-        window_start = change_sample;
-        position = change_sample;
+    let mut window_start_seconds = 0.0;
+    let mut pushed = 0;
+    for chunk in samples.chunks(run::chunk_len()) {
+        pushed += chunk.len();
+        for event in session.push(chunk) {
+            match event {
+                SessionEvent::WindowStarted { at_seconds, .. } => {
+                    window_start_seconds = at_seconds;
+                }
+                SessionEvent::WindowEnded {
+                    duration_seconds,
+                    reason: WindowEndReason::Change,
+                    ..
+                } => splits.push(Split {
+                    detect_tick: tick_at(pushed as f32 / rate),
+                    change_tick: tick_at(window_start_seconds + duration_seconds),
+                    cause: Cause::Tempo,
+                }),
+                SessionEvent::WindowEnded { .. } | SessionEvent::Estimate { .. } => {}
+            }
+        }
     }
     splits
 }

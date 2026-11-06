@@ -1055,7 +1055,7 @@ fn print_cpu(input: &CpuInput) -> Result<(), String> {
         ),
         (
             format!(
-                "analyzer + `{}` ChangeDetector (session, with re-analysis after splits)",
+                "analyzer + `{}` ChangeDetector (the production Session, with re-analysis after splits)",
                 production::CONFIG
             ),
             core,
