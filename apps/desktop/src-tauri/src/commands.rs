@@ -8,14 +8,13 @@ use crate::feed::AudioFeed;
 use crate::listener::{self, Listener, emit};
 use crate::remembered::{RememberedSource, RememberedSourceFile};
 use crate::sources::{
-    self, Available, HAS_DEV_SOURCE, Listenable, SourceDto, SourceListDto, StartChoice,
+    self, Available, DevSource, HAS_DEV_SOURCE, Listenable, SourceDto, SourceListDto, StartChoice,
 };
 use crate::status::{Failure, SOURCE_STATUS_EVENT, SourceStatusDto};
 use crate::test_beat::TestBeatFeed;
 
-/// Set to `test-beat` in a debug build to make `listen` start the test beat.
+/// Set to `test-beat` or `test-mix` in a debug build to make `listen` start that dev source.
 const DEV_SOURCE_VARIABLE: &str = "HUNCH_DEV_SOURCE";
-const DEV_SOURCE_VALUE: &str = "test-beat";
 const NO_SOURCE_MESSAGE: &str = "There's no output device to listen to.";
 
 pub struct AppState {
@@ -96,7 +95,7 @@ fn start_chosen(app: &AppHandle, state: &AppState) -> Result<(), StartFailure> {
     let source = sources::choose_start(StartChoice {
         listenables: &listenables,
         remembered: remembered.as_ref(),
-        wants_dev_source: wants_dev_source(),
+        wanted_dev_source: wanted_dev_source(),
     })
     .ok_or_else(|| without_source(NO_SOURCE_MESSAGE.to_owned()))?;
     start(Start {
@@ -130,8 +129,9 @@ fn open_feed(
     backend: &dyn AudioBackend,
     source: &Listenable,
 ) -> Result<Box<dyn AudioFeed>, String> {
-    let Listenable::Capture(capture) = source else {
-        return Ok(Box::new(TestBeatFeed::new()));
+    let capture = match source {
+        Listenable::Dev(dev_source) => return Ok(Box::new(TestBeatFeed::new(*dev_source))),
+        Listenable::Capture(capture) => capture,
     };
     let couldnt_start =
         |error: CaptureError| format!("Couldn't listen to {}: {error}", capture.name);
@@ -147,7 +147,7 @@ fn available(state: &AppState) -> Result<Vec<Listenable>, CaptureError> {
     }))
 }
 
-fn wants_dev_source() -> bool {
-    let asked = std::env::var(DEV_SOURCE_VARIABLE).is_ok_and(|value| value == DEV_SOURCE_VALUE);
-    HAS_DEV_SOURCE && asked
+fn wanted_dev_source() -> Option<DevSource> {
+    let asked = std::env::var(DEV_SOURCE_VARIABLE).ok()?;
+    DevSource::from_variable(&asked).filter(|_| HAS_DEV_SOURCE)
 }

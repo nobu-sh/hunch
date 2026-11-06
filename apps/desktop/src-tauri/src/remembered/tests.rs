@@ -2,6 +2,7 @@ use std::process;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::*;
+use crate::sources::DevSource;
 
 static NEXT_DIR: AtomicU32 = AtomicU32::new(0);
 
@@ -103,8 +104,8 @@ fn apps_are_remembered_by_name_and_everything_else_by_id() {
 
     assert_eq!(RememberedSource::of(&chrome), app("chrome"));
     assert_eq!(
-        RememberedSource::of(&Listenable::TestBeat),
-        device(crate::sources::DEV_SOURCE_ID)
+        RememberedSource::of(&Listenable::Dev(DevSource::TestBeat)),
+        device(DevSource::TestBeat.id())
     );
 }
 
