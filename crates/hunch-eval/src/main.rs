@@ -10,6 +10,7 @@ mod keys;
 mod metrics;
 mod octave;
 mod profile_fit;
+mod real_mixes;
 mod report;
 mod resample;
 mod run;
@@ -59,6 +60,8 @@ enum Command {
     Keys(keys::KeysArgs),
     /// Dump every estimate plus key detector inputs per sound, for one split.
     Timeline(timeline::TimelineArgs),
+    /// Score session windows on recorded mixes against hand-marked key and BPM changes.
+    RealMixes(real_mixes::RealMixesArgs),
 }
 
 #[derive(Args)]
@@ -185,6 +188,7 @@ fn main() -> ExitCode {
         Command::KeySweep(args) => key_sweep::run(&args),
         Command::Keys(args) => keys::run(&args),
         Command::Timeline(args) => timeline::run(&args),
+        Command::RealMixes(args) => real_mixes::run(&args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

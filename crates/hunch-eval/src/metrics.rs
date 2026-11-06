@@ -315,7 +315,7 @@ impl LockStats {
     }
 }
 
-fn median(sorted: &[f32]) -> Option<f32> {
+pub fn median(sorted: &[f32]) -> Option<f32> {
     let middle = sorted.len() / 2;
     match sorted.len() {
         0 => None,
