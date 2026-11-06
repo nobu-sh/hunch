@@ -21,6 +21,7 @@ import {
   type CloseLabels,
 } from '@hunch/ui/components';
 import { backend } from './backend';
+import { publishDevState } from './dev-state';
 import { anchorWindowTo, type WindowAnchor } from './placement';
 import { followSession } from './session';
 import { useAlwaysOnTop } from './use-always-on-top';
@@ -65,6 +66,9 @@ export function App() {
   };
   useSubscription({ subscribe: () => backend.onSourceStatus(followStatus), onError: showError });
   const alwaysOnTop = useAlwaysOnTop(showError);
+  useEffect(() => {
+    if (import.meta.env.DEV) publishDevState({ state, source: status });
+  }, [state, status]);
 
   const anchorRef = useRef<WindowAnchor | null>(null);
   useEffect(() => {

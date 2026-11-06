@@ -35,7 +35,7 @@ On Linux, building `apps/desktop/src-tauri` needs Tauri's system packages; CI in
 ```sh
 pnpm desktop:dev      # opens the app: Vite dev server + tauri dev, WebView2 debug port 9230
 pnpm desktop:build    # release build: target/release/hunch-desktop.exe and the installer in target/release/bundle/nsis/
-pnpm browser:desktop  # with desktop:dev running: attach to the app's page and print its key and BPM
+pnpm browser:desktop  # with desktop:dev running: attach to the app's page and print its session from the dev state
 ```
 
 - The window is the overlay: transparent, undecorated, and resized to the panel or pill. Drag the header or pill to move it. Close hides it to the tray, and the session keeps running; the tray's Quit exits.
@@ -43,6 +43,8 @@ pnpm browser:desktop  # with desktop:dev running: attach to the app's page and p
 - `window-settings.json` in the app data dir holds that position and always-on-top (default on), which the header pin and the tray menu both toggle. The tray icon's left click shows or hides the window; its menu has Show/Hide, Always on top and Quit.
 - The UI subscribes to `session-event` and `source-status`, then calls the `listen` command, which starts a fresh session so no event is missed. `listen` starts the remembered source (`remembered-source.json` in the app data dir) if it's still around, else the default output device's loopback. Devices are remembered by id, apps by executable name, so a restarted app is found again.
 - Commands: `list_sources` (`{ sources, listsApps }`), `select_source { id }` (fresh session on that source, remembered), `current_source`, `listen`; for the window, `window_settings`, `save_window_position { position }`, `set_always_on_top { enabled }` (also emits `always-on-top`), `set_window_bounds { bounds }` and `hide_to_tray`. `source-status` is `{ sourceId, state: listening | ended | silent | failed, message }`; `silent` means an app or output device gave only digital silence for 15 s. When a source ends or is replaced, its open window is finished first: its last `session-event`s, ending in `windowEnded`, come before `ended`/`failed` or the next source's `listening`.
+- Dev builds (`import.meta.env.DEV`, so not release bundles) publish what the UI holds on `window.__hunchDev`, a `DesktopDevState` (`@hunch/ui/dev`): `state` (the `SessionState` the overlay renders), `source` (the latest `source-status`) and `log` (the last 200 raw `session-event`s and `source-status`es, oldest first, each with a rising `seq` and `receivedAt`). `src/dev-state.ts` fills it by wrapping the backend. Committed checks read this, never the DOM: see "Committed checks read session data, not the DOM".
+- While another Hunch (e.g. an installed or release build) is running, the dev app's webview joins that app's WebView2 browser process, so port 9230 never opens. Give the dev app its own data folder: `WEBVIEW2_USER_DATA_FOLDER=<some empty dir> pnpm desktop:dev`.
 - Debug builds list a dev source, `dev:test-beat` (120 BPM, A minor, synthesized). `HUNCH_DEV_SOURCE=test-beat pnpm desktop:dev` makes `listen` start it.
 - Tauri is pinned to 2.11 (crate and npm) because 2.12 needs rustc 1.90.
 - The installer is an unsigned, per-user NSIS setup (`Hunch_<version>_x64-setup.exe`, no admin prompt). It installs silently with `/S /D=<dir>`, and `uninstall.exe /S` removes it.
@@ -77,7 +79,18 @@ pnpm browser --url https://example.com --extension extension/.output/chrome-mv3
 
 Flags: `--url`, `--headless`, `--connect <port|http(s) URL|ws(s) endpoint>`, `--reuse-page` (with `--connect`, drive the first open page instead of a new tab), `--extension <dir>` (repeatable), `--seconds <n>`, `--window-size <w>x<h>`, `--devtools`, `--profile <dir>` (default: a fresh profile), `--mute`, `--console errors|all|none`, `--endpoint-file <path>`, `--chrome-arg <flag>` (repeatable), `--mixin <file>`. Flags override a mixin's defaults; see `pnpm browser --help`.
 
-While it runs, a launched browser's DevTools endpoint is in `.chrome/devtools-endpoint.txt`. To look at or poke the UI, script standard Puppeteer against it. Save the script in `packages/browser` so it resolves `puppeteer-core`, and run it with `node`:
+### Committed checks read session data, not the DOM
+
+Checks and mixins committed for the extension and the desktop app read session data, never the page DOM, query selectors or `data-ref` text, because markup changes. Clicking to drive the UI is fine. One-off Puppeteer scripts you run while testing by hand, next to screenshots, may read the DOM to confirm what's on screen; just don't commit them.
+
+- Extension: the tab's `SessionState` in the background's `chrome.storage.session`, read through its service worker (`readTabSession` in `extension/dev/setup.ts`).
+- Desktop app: `window.__hunchDev` in a dev build (see "Desktop app"), e.g. `await page.evaluate(() => window.__hunchDev.state)`.
+- `@hunch/ui/dev` has dev-only summaries both share (`formatSession`, `newestEstimate`, `formatLogEntry`). It imports only types, so Node runs it straight from the mixins; production code doesn't import it.
+- The `@hunch/ui` component tests (Testing Library) test the rendered DOM on purpose; this rule doesn't apply to them. Neither does driving the test-beat page's own `<audio>` element in `extension/dev/test-beat.ts`, which is the test page, not Hunch's UI.
+
+### Scripting Puppeteer
+
+While it runs, a launched browser's DevTools endpoint is in `.chrome/devtools-endpoint.txt`. To look at or drive the UI, script standard Puppeteer against it. Save the script in `packages/browser` so it resolves `puppeteer-core`, and run it with `node`:
 
 ```js
 import puppeteer from 'puppeteer-core';
@@ -87,7 +100,6 @@ const browser = await puppeteer.connect({ browserWSEndpoint: endpoint, defaultVi
 const page = (await browser.pages()).find((tab) => tab.url().startsWith('http'));
 await page.screenshot({ path: 'shot.png' }); // or: (await page.$('hunch-overlay')).screenshot(...)
 await page.mouse.click(1180, 38); // viewport x, y
-console.log(await page.evaluate(() => document.title));
 await browser.disconnect(); // leaves the browser open
 ```
 
@@ -107,7 +119,7 @@ export default defineMixin({
 
 The context also has `browser`, `options`, `endpoint`, the console `errors` collected so far, a `signal` that aborts when the browser closes or time runs out, and `seconds`.
 
-- `apps/desktop/dev/browser.ts` (`pnpm browser:desktop`) connects to port 9230 with `reusePage`, so it drives the app's own page. A Puppeteer script can attach the same way: `puppeteer.connect({ browserURL: 'http://127.0.0.1:9230', defaultViewport: null })`. Nothing writes an endpoint file for an attached browser.
+- `apps/desktop/dev/browser.ts` (`pnpm browser:desktop`) connects to port 9230 with `reusePage`, so it drives the app's own page. It polls `window.__hunchDev`, prints a readout line (source state, window, key, BPM, history, errors) when it changes, and prints each window start, window end and source status from the log as it arrives. A Puppeteer script can attach the same way: `puppeteer.connect({ browserURL: 'http://127.0.0.1:9230', defaultViewport: null })`. Nothing writes an endpoint file for an attached browser.
 - The Hunch mixins live in `extension/dev/`:
   - `browser.ts` (`pnpm browser:extension`): the build on the test beat. It turns Hunch on and prints the tab's session state from `chrome.storage.session` until the browser closes.
   - `browser-check.ts` (`pnpm browser:check`): headless for 12 s. It passes on a window with estimates, a tempo near 120 BPM (or half or double), and no session or console errors. The key isn't judged.
