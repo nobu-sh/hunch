@@ -9,6 +9,7 @@ import type {
   SourceStatus,
 } from '@hunch/ui';
 import type { SourceClient } from '@hunch/ui/components';
+import { exposeDevState } from './dev-state';
 
 /** Must match the event names in src-tauri. */
 const SESSION_EVENT = 'session-event';
@@ -53,7 +54,7 @@ export interface Backend extends SourceClient {
   onAlwaysOnTop: (handler: (enabled: boolean) => void) => Promise<UnlistenFn>;
 }
 
-export const backend: Backend = {
+const tauriBackend: Backend = {
   listSources: () => invoke<SourceList>('list_sources'),
   currentSource: () => invoke<AudioSource | null>('current_source'),
   selectSource: (id) => invoke('select_source', { id }),
@@ -77,3 +78,5 @@ export const backend: Backend = {
       handler(payload);
     }),
 };
+
+export const backend: Backend = import.meta.env.DEV ? exposeDevState(tauriBackend) : tauriBackend;
