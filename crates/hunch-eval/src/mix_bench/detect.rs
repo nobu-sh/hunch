@@ -260,6 +260,8 @@ pub enum Approach {
     Recent(RecentRule),
     Novelty(NoveltyRule),
     Grid(GridRule),
+    /// The production `hunch_core::ChangeDetector`, run with the trace (`Trace::core_splits`).
+    Core,
 }
 
 /// Runs `approach` over the trace. `novelty` must be the curve for a novelty rule's half width
@@ -269,6 +271,7 @@ pub fn run_session(prep: &Prepared, approach: &Approach, novelty: &[f32]) -> Vec
         Approach::Recent(rule) => run_recent(prep, rule),
         Approach::Novelty(rule) => run_novelty(prep, rule, novelty),
         Approach::Grid(rule) => run_grid(prep, rule),
+        Approach::Core => prep.trace.core_splits.clone(),
     }
 }
 

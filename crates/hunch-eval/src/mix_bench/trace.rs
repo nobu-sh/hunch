@@ -5,7 +5,9 @@ use hunch_core::rhythm::TempoEstimate;
 use hunch_core::tonal::{ChromaBlock, KeyDetectorConfig};
 use hunch_core::{Analyzer, Estimate};
 
+use super::detect::Split;
 use super::features::{FrontEnd, TIMBRE_BANDS};
+use super::production;
 use crate::resample::ANALYSIS_SAMPLE_RATE;
 use crate::run;
 
@@ -41,6 +43,8 @@ pub struct Trace {
     pub ticks: Vec<Tick>,
     /// All-band onset envelope at `features::frame_rate()`.
     pub flux: Vec<f32>,
+    /// What the production detector splits the clip at (`production::splits`).
+    pub core_splits: Vec<Split>,
 }
 
 impl Trace {
@@ -76,6 +80,7 @@ pub fn analyze(samples: &[f32]) -> Trace {
     Trace {
         ticks,
         flux: front_end.flux,
+        core_splits: production::splits(samples),
     }
 }
 

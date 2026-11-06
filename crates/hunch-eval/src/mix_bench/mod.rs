@@ -10,6 +10,7 @@ mod features;
 mod grid;
 mod keys;
 mod pool;
+mod production;
 mod render;
 mod score;
 mod trace;
@@ -994,10 +995,14 @@ fn print_cpu(input: &CpuInput) -> Result<(), String> {
     let front_end = time(&|samples| {
         std::hint::black_box(features::flux_of(samples));
     });
+    let core = time(&|samples| {
+        std::hint::black_box(production::splits(samples));
+    });
     let scorer = Scorer::new();
     let detectors: Vec<(String, f32)> = input
         .picks
         .iter()
+        .filter(|&&pick| input.configs[pick].1 != Approach::Core)
         .map(|&pick| {
             let (name, approach) = &input.configs[pick];
             let started = Instant::now();
@@ -1047,6 +1052,13 @@ fn print_cpu(input: &CpuInput) -> Result<(), String> {
         (
             "bench onset/timbre front end (novelty, beat grid)".to_string(),
             front_end,
+        ),
+        (
+            format!(
+                "analyzer + `{}` ChangeDetector (session, with re-analysis after splits)",
+                production::CONFIG
+            ),
+            core,
         ),
     ];
     for (name, value) in rows {
