@@ -17,7 +17,7 @@ pub use profiles::KeyProfile;
 
 use crate::Key;
 use crate::dsp::Stft;
-use peaks::{PeakPicker, PeakPickerSettings};
+use peaks::{Peak, PeakPicker, PeakPickerSettings};
 use pitch_histogram::{PitchHistogram, estimate_tuning};
 use profiles::{KeyScoring, rank_keys};
 
@@ -101,6 +101,12 @@ pub struct KeyDetectorConfig {
     pub harmonicity_exponent: f32,
     /// Peaks count as `ln(1 + magnitude_compression · magnitude)`, 1.0 magnitude = full-scale sine.
     pub magnitude_compression: f32,
+    /// Experimental, off by default: evidence fades with this exponential time constant instead of
+    /// accumulating for the whole window, so a new key can take over. `None` keeps everything.
+    pub forget_seconds: Option<f32>,
+    /// Experimental, for `hunch-eval mix-bench`: also tally evidence per block, read and cleared by
+    /// `KeyDetector::take_block`. Doesn't change estimates.
+    pub track_blocks: bool,
 }
 
 impl Default for KeyDetectorConfig {
@@ -117,6 +123,8 @@ impl Default for KeyDetectorConfig {
             overtone_weight: 0.3,
             harmonicity_exponent: 1.0,
             magnitude_compression: 100.0,
+            forget_seconds: None,
+            track_blocks: false,
         }
     }
 }
@@ -149,7 +157,12 @@ impl KeyDetector {
         Self {
             config,
             stft,
-            evidence: Evidence::new(picker, hop_size as f32 / sample_rate as f32),
+            evidence: Evidence::new(EvidenceSettings {
+                picker,
+                hop_seconds: hop_size as f32 / sample_rate as f32,
+                forget_seconds: config.forget_seconds,
+                track_blocks: config.track_blocks,
+            }),
         }
     }
 
@@ -172,15 +185,15 @@ impl KeyDetector {
     /// Like `estimate`, but keeps `held` (the key shown so far) unless another key beats it by
     /// more than `HOLD_MARGIN`. The presence gate still judges the best key.
     pub fn estimate_holding(&self, held: Option<Key>) -> KeyEstimate {
-        let tonalness = self.evidence.tonalness();
+        let tonalness = self.evidence.total.tonalness();
         let tuning = self.tuning_cents();
         let scoring = KeyScoring {
             profile: self.config.profile,
-            tonic_cue: scaled_to_max(self.evidence.bass.fold(tuning)),
+            tonic_cue: scaled_to_max(self.evidence.total.bass.fold(tuning)),
             tonic_weight: self.config.tonic_weight,
         };
         let ranking = rank_keys(&self.chroma_at(tuning), scoring);
-        let evidence = self.evidence.sufficiency();
+        let evidence = self.evidence.total.sufficiency();
         let no_key = |presence: f32, clarity: f32| KeyEstimate {
             key: None,
             confidence: 0.0,
@@ -225,7 +238,7 @@ impl KeyDetector {
 
     /// Deviation of the audio from A = 440 Hz in cents, in `-50.0..50.0`. 0 before any pitch is heard.
     pub fn tuning_cents(&self) -> f32 {
-        estimate_tuning(&[&self.evidence.bass, &self.evidence.treble])
+        estimate_tuning(&[&self.evidence.total.bass, &self.evidence.total.treble])
     }
 
     /// Tuning-corrected pitch-class profile, index 0 = C, scaled so the largest bin is 1.
@@ -236,15 +249,31 @@ impl KeyDetector {
 
     /// Tuning-corrected pitch classes of the bass notes (the tonic cue), scaled like `chroma`.
     pub fn bass_chroma(&self) -> [f32; PITCH_CLASSES] {
-        scaled_to_max(self.evidence.bass.fold(self.tuning_cents()))
+        scaled_to_max(self.evidence.total.bass.fold(self.tuning_cents()))
     }
 
     fn chroma_at(&self, tuning: f32) -> [f32; PITCH_CLASSES] {
-        let treble = normalized_sum(self.evidence.treble.fold(tuning));
-        let bass = normalized_sum(self.evidence.bass.fold(tuning));
+        let treble = normalized_sum(self.evidence.total.treble.fold(tuning));
+        let bass = normalized_sum(self.evidence.total.bass.fold(tuning));
         scaled_to_max(std::array::from_fn(|pitch| {
             treble[pitch] + self.config.bass_weight * bass[pitch]
         }))
+    }
+
+    /// Experimental, for `hunch-eval mix-bench`: the evidence since the previous call, folded at the current tuning, then
+    /// clears it. `None` unless `track_blocks` is set.
+    pub fn take_block(&mut self) -> Option<ChromaBlock> {
+        let tuning = self.tuning_cents();
+        let block = self.evidence.block.as_mut()?;
+        let taken = ChromaBlock {
+            treble: block.treble.fold(tuning),
+            bass: block.bass.fold(tuning),
+            active_frames: block.active_frames,
+            harmonicity_sum: block.harmonicity_sum,
+            tonal_seconds: block.tonal_seconds,
+        };
+        block.reset();
+        Some(taken)
     }
 
     pub fn reset(&mut self) {
@@ -253,29 +282,48 @@ impl KeyDetector {
     }
 }
 
-/// Everything accumulated from frames since the last reset.
+/// Unnormalized evidence over a stretch of frames, so blocks can be summed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChromaBlock {
+    pub treble: [f32; PITCH_CLASSES],
+    pub bass: [f32; PITCH_CLASSES],
+    /// Frames that weren't silent.
+    pub active_frames: f32,
+    pub harmonicity_sum: f32,
+    /// Seconds of audio, each frame counted by its harmonicity.
+    pub tonal_seconds: f32,
+}
+
+struct EvidenceSettings {
+    picker: PeakPicker,
+    hop_seconds: f32,
+    forget_seconds: Option<f32>,
+    track_blocks: bool,
+}
+
+/// Peak picking plus everything accumulated from its frames.
 struct Evidence {
     picker: PeakPicker,
     hop_seconds: f32,
-    bass: PitchHistogram,
-    treble: PitchHistogram,
-    /// Frames that weren't silent.
-    active_frames: u32,
-    harmonicity_sum: f32,
-    /// Seconds of audio, each frame counted by its harmonicity.
-    tonal_seconds: f32,
+    /// Everything since the last reset, faded per frame when `forget_seconds` is set.
+    total: Tally,
+    /// Multiplier applied to `total` before each frame is added.
+    fade_per_frame: Option<f32>,
+    /// Frames since the last `take_block`, when blocks are tracked.
+    block: Option<Tally>,
 }
 
 impl Evidence {
-    fn new(picker: PeakPicker, hop_seconds: f32) -> Self {
+    fn new(settings: EvidenceSettings) -> Self {
+        let fade_per_frame = settings
+            .forget_seconds
+            .map(|seconds| (-settings.hop_seconds / seconds.max(f32::MIN_POSITIVE)).exp());
         Self {
-            picker,
-            hop_seconds,
-            bass: PitchHistogram::new(),
-            treble: PitchHistogram::new(),
-            active_frames: 0,
-            harmonicity_sum: 0.0,
-            tonal_seconds: 0.0,
+            picker: settings.picker,
+            hop_seconds: settings.hop_seconds,
+            total: Tally::new(),
+            fade_per_frame,
+            block: settings.track_blocks.then(Tally::new),
         }
     }
 
@@ -283,13 +331,68 @@ impl Evidence {
         let Some(summary) = self.picker.analyze(magnitudes) else {
             return;
         };
-        self.active_frames += 1;
-        self.harmonicity_sum += summary.harmonicity;
-        self.tonal_seconds += summary.harmonicity * self.hop_seconds;
+        let frame = Frame {
+            peaks: self.picker.peaks(),
+            harmonicity: summary.harmonicity,
+            hop_seconds: self.hop_seconds,
+            config,
+        };
+        if let Some(fade) = self.fade_per_frame {
+            self.total.fade(fade);
+        }
+        self.total.add(&frame);
+        if let Some(block) = self.block.as_mut() {
+            block.add(&frame);
+        }
+    }
 
-        let frame_weight = summary.harmonicity.powf(config.harmonicity_exponent);
-        // Peaks are in ascending frequency order.
-        for peak in self.picker.peaks() {
+    fn reset(&mut self) {
+        self.total.reset();
+        if let Some(block) = self.block.as_mut() {
+            block.reset();
+        }
+    }
+}
+
+/// One analyzed, non-silent frame.
+struct Frame<'a> {
+    /// In ascending frequency order.
+    peaks: &'a [Peak],
+    harmonicity: f32,
+    hop_seconds: f32,
+    config: &'a KeyDetectorConfig,
+}
+
+/// Pitch evidence and frame statistics accumulated from frames.
+struct Tally {
+    bass: PitchHistogram,
+    treble: PitchHistogram,
+    /// Frames that weren't silent.
+    active_frames: f32,
+    harmonicity_sum: f32,
+    /// Seconds of audio, each frame counted by its harmonicity.
+    tonal_seconds: f32,
+}
+
+impl Tally {
+    fn new() -> Self {
+        Self {
+            bass: PitchHistogram::new(),
+            treble: PitchHistogram::new(),
+            active_frames: 0.0,
+            harmonicity_sum: 0.0,
+            tonal_seconds: 0.0,
+        }
+    }
+
+    fn add(&mut self, frame: &Frame) {
+        let config = frame.config;
+        self.active_frames += 1.0;
+        self.harmonicity_sum += frame.harmonicity;
+        self.tonal_seconds += frame.harmonicity * frame.hop_seconds;
+
+        let frame_weight = frame.harmonicity.powf(config.harmonicity_exponent);
+        for peak in frame.peaks {
             if peak.frequency > config.high_hz {
                 break;
             }
@@ -310,12 +413,20 @@ impl Evidence {
         }
     }
 
+    fn fade(&mut self, factor: f32) {
+        self.bass.scale(factor);
+        self.treble.scale(factor);
+        self.active_frames *= factor;
+        self.harmonicity_sum *= factor;
+        self.tonal_seconds *= factor;
+    }
+
     /// Mean harmonicity of the non-silent frames.
     fn tonalness(&self) -> f32 {
-        if self.active_frames == 0 {
+        if self.active_frames <= 0.0 {
             return 0.0;
         }
-        self.harmonicity_sum / self.active_frames as f32
+        self.harmonicity_sum / self.active_frames
     }
 
     /// 0..=1, grows with the amount of harmonic audio heard.
@@ -326,7 +437,7 @@ impl Evidence {
     fn reset(&mut self) {
         self.bass.reset();
         self.treble.reset();
-        self.active_frames = 0;
+        self.active_frames = 0.0;
         self.harmonicity_sum = 0.0;
         self.tonal_seconds = 0.0;
     }
