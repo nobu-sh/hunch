@@ -1,4 +1,6 @@
-// A local page that synthesizes a known beat with Web Audio, so Hunch has something to hear.
+// Local pages that synthesize known music with Web Audio, so Hunch has something to hear: the
+// test beat, and the test mix, which goes from the test beat straight into a faster song in
+// another key, with no gap. apps/desktop/src-tauri/src/test_beat.rs renders the same audio.
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Page } from 'puppeteer-core';
@@ -10,35 +12,84 @@ export interface TestBeatServer {
   close: () => Promise<void>;
 }
 
-export const TEST_BEAT = {
-  bpm: 120,
-  /** A natural minor: the overlay should land on A minor or its relative, C major. */
-  scale: 'A minor',
-};
+/** One song of a test page: a looped chord progression over the drum pattern. */
+interface Song {
+  bpm: number;
+  /** The overlay should land on this key or its relative. */
+  scale: string;
+  bars: number;
+  /** MIDI notes per bar: the bass, then the chord. */
+  chords: number[][];
+  description: string;
+}
 
-const PAGE = /* html */ `<!doctype html>
-<meta charset="utf-8" />
-<title>Hunch test beat</title>
-<style>body { font: 16px system-ui; margin: 40px; background: #fafafa; }</style>
-<h1>Hunch test beat</h1>
-<audio controls loop></audio>
-<p>${String(TEST_BEAT.bpm)} BPM, ${TEST_BEAT.scale}: Am, Dm, Em, Am, with kick, snare and hats.</p>
-<script>
-const BPM = ${String(TEST_BEAT.bpm)};
-const BEAT = 60 / BPM;
-const BAR = BEAT * 4;
-const CHORDS = [
+const A_MINOR_CHORDS = [
   [45, 57, 60, 64], // Am: A2 bass, A3 C4 E4
   [50, 62, 65, 69], // Dm
   [52, 64, 67, 71], // Em
   [45, 57, 60, 64], // Am
 ];
-const LOOP_BARS = 16;
+/** The A minor progression a minor third down. */
+const F_SHARP_MINOR_CHORDS = [
+  [42, 54, 57, 61], // F#m
+  [47, 59, 62, 66], // Bm
+  [49, 61, 64, 68], // C#m
+  [42, 54, 57, 61], // F#m
+];
+
+export const TEST_BEAT = {
+  bpm: 120,
+  /** A natural minor: the overlay should land on A minor or its relative, C major. */
+  scale: 'A minor',
+  bars: 16,
+  chords: A_MINOR_CHORDS,
+  description: 'Am, Dm, Em, Am, with kick, snare and hats',
+} satisfies Song;
+
+const MIX_OPENER = { ...TEST_BEAT, bars: 20 } satisfies Song;
+
+/** 40 s of the test beat, then 41 s at 140 BPM in F# minor, looping: Hunch should split on each change. */
+export const TEST_MIX: [Song, Song] = [
+  MIX_OPENER,
+  {
+    bpm: 140,
+    scale: 'F# minor',
+    bars: 24,
+    chords: F_SHARP_MINOR_CHORDS,
+    description: 'F#m, Bm, C#m, F#m',
+  },
+];
+
+const BEATS_PER_BAR = 4;
+
+function songSeconds(song: Song): number {
+  return (song.bars * BEATS_PER_BAR * 60) / song.bpm;
+}
+
+/** Seconds into the test mix where its first song gives way to the second. */
+export const TEST_MIX_CHANGE_SECONDS = songSeconds(MIX_OPENER);
+
+function songLine(song: Song): string {
+  return `<li>${String(song.bpm)} BPM, ${song.scale}: ${song.description}.</li>`;
+}
+
+function page(params: { title: string; songs: Song[] }): string {
+  const { title, songs } = params;
+  return /* html */ `<!doctype html>
+<meta charset="utf-8" />
+<title>${title}</title>
+<style>body { font: 16px system-ui; margin: 40px; background: #fafafa; }</style>
+<h1>${title}</h1>
+<audio controls loop></audio>
+<ul>${songs.map(songLine).join('')}</ul>
+<script>
+const SONGS = ${JSON.stringify(songs.map(({ bpm, bars, chords }) => ({ bpm, bars, chords })))};
 const SAMPLE_RATE = 44100;
+const songSeconds = ({ bpm, bars }) => (bars * 4 * 60) / bpm;
 
 // Rendered offline and played through a looping <audio> element: tab capture misses Web Audio
 // contexts that were already running when capture started, but always hears media elements.
-const length = LOOP_BARS * BAR;
+const length = SONGS.reduce((total, song) => total + songSeconds(song), 0);
 const context = new OfflineAudioContext(1, Math.ceil(length * SAMPLE_RATE), SAMPLE_RATE);
 const master = context.createGain();
 master.gain.value = 0.5;
@@ -87,18 +138,24 @@ function hit({ start, length, gain, highpass }) {
   source.stop(start + length);
 }
 
-for (let bar = 0; bar < LOOP_BARS; bar++) {
-  const barStart = bar * BAR;
-  const [bass, ...chord] = CHORDS[bar % CHORDS.length];
-  tone({ midi: bass, start: barStart, length: BAR, gain: 0.25, type: 'triangle' });
-  for (const midi of chord) tone({ midi, start: barStart, length: BAR, gain: 0.08, type: 'sawtooth' });
-  for (let beat = 0; beat < 4; beat++) {
-    const beatStart = barStart + beat * BEAT;
-    if (beat % 2 === 0) kick(beatStart);
-    else hit({ start: beatStart, length: 0.15, gain: 0.5, highpass: 1500 });
-    hit({ start: beatStart, length: 0.04, gain: 0.15, highpass: 7000 });
-    hit({ start: beatStart + BEAT / 2, length: 0.04, gain: 0.1, highpass: 7000 });
+let songStart = 0;
+for (const song of SONGS) {
+  const beat = 60 / song.bpm;
+  const bar = beat * 4;
+  for (let index = 0; index < song.bars; index++) {
+    const barStart = songStart + index * bar;
+    const [bass, ...chord] = song.chords[index % song.chords.length];
+    tone({ midi: bass, start: barStart, length: bar, gain: 0.25, type: 'triangle' });
+    for (const midi of chord) tone({ midi, start: barStart, length: bar, gain: 0.08, type: 'sawtooth' });
+    for (let step = 0; step < 4; step++) {
+      const beatStart = barStart + step * beat;
+      if (step % 2 === 0) kick(beatStart);
+      else hit({ start: beatStart, length: 0.15, gain: 0.5, highpass: 1500 });
+      hit({ start: beatStart, length: 0.04, gain: 0.15, highpass: 7000 });
+      hit({ start: beatStart + beat / 2, length: 0.04, gain: 0.1, highpass: 7000 });
+    }
   }
+  songStart += songSeconds(song);
 }
 
 /** 16-bit mono PCM WAV. */
@@ -128,12 +185,13 @@ context.startRendering().then((rendered) => {
 });
 </script>
 `;
+}
 
-/** Serves the test page on a free localhost port. Overlays only inject into http(s) pages. */
-export async function startTestBeat(): Promise<TestBeatServer> {
+/** Serves a test page on a free localhost port. Overlays only inject into http(s) pages. */
+async function serve(html: string): Promise<TestBeatServer> {
   const server = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(PAGE);
+    response.end(html);
   });
   await new Promise<void>((resolve) => {
     server.listen(0, LOCAL_HOST, resolve);
@@ -152,7 +210,15 @@ export async function startTestBeat(): Promise<TestBeatServer> {
   };
 }
 
-/** Resolves once the test page's beat is playing. */
+export function startTestBeat(): Promise<TestBeatServer> {
+  return serve(page({ title: 'Hunch test beat', songs: [TEST_BEAT] }));
+}
+
+export function startTestMix(): Promise<TestBeatServer> {
+  return serve(page({ title: 'Hunch test mix', songs: TEST_MIX }));
+}
+
+/** Resolves once the test page's audio is playing. */
 export async function waitForTestBeat(page: Page): Promise<void> {
   await page.waitForFunction(() => document.querySelector('audio')?.paused === false);
 }
