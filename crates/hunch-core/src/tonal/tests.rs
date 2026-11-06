@@ -305,3 +305,87 @@ fn every_profile_detects_clear_progressions() {
         );
     }
 }
+
+fn repeated(chords: &Progression, times: usize) -> Vec<f32> {
+    progression(chords, 0.0).repeat(times)
+}
+
+#[test]
+fn forgetting_lets_a_new_key_take_over() {
+    // 36 s of C major, then 12 s of F# major (no shared notes).
+    let audio = [repeated(C_MAJOR, 3), repeated(F_SHARP_MAJOR, 1)].concat();
+    let forgetting = KeyDetectorConfig {
+        forget_seconds: Some(3.0),
+        ..KeyDetectorConfig::default()
+    };
+    let mut keeping = KeyDetector::new(SAMPLE_RATE);
+    let mut forgetful = KeyDetector::with_config(SAMPLE_RATE, forgetting);
+    keeping.push(&audio);
+    forgetful.push(&audio);
+    assert_eq!(keeping.estimate().key, Some(key(C, Mode::Major)));
+    assert_eq!(forgetful.estimate().key, Some(key(F_SHARP, Mode::Major)));
+}
+
+#[test]
+fn forgetting_bounds_the_evidence_to_its_time_constant() {
+    let forget_seconds = 3.0;
+    let forgetting = KeyDetectorConfig {
+        forget_seconds: Some(forget_seconds),
+        ..KeyDetectorConfig::default()
+    };
+    let mut keeping = KeyDetector::new(SAMPLE_RATE);
+    let mut forgetful = KeyDetector::with_config(SAMPLE_RATE, forgetting);
+    let audio = repeated(C_MAJOR, 3);
+    keeping.push(&audio);
+    forgetful.push(&audio);
+    let kept = keeping.evidence.total.tonal_seconds;
+    let faded = forgetful.evidence.total.tonal_seconds;
+    assert!(faded <= forget_seconds, "faded {faded}");
+    assert!(kept > 4.0 * forget_seconds, "kept {kept}");
+}
+
+#[test]
+fn tracking_blocks_leaves_estimates_unchanged() {
+    let config = KeyDetectorConfig {
+        forget_seconds: None,
+        track_blocks: true,
+        ..KeyDetectorConfig::default()
+    };
+    let mut plain = KeyDetector::new(SAMPLE_RATE);
+    let mut tracking = KeyDetector::with_config(SAMPLE_RATE, config);
+    let audio = [repeated(C_MAJOR, 1), repeated(F_SHARP_MAJOR, 1)].concat();
+    for chunk in audio.chunks(SAMPLE_RATE as usize / 2) {
+        plain.push(chunk);
+        tracking.push(chunk);
+        tracking.take_block();
+        assert_eq!(plain.estimate(), tracking.estimate());
+    }
+}
+
+#[test]
+fn blocks_hold_only_the_evidence_since_the_last_take() {
+    let config = KeyDetectorConfig {
+        track_blocks: true,
+        ..KeyDetectorConfig::default()
+    };
+    let mut detector = KeyDetector::with_config(SAMPLE_RATE, config);
+    detector.push(&progression(C_MAJOR, 0.0));
+    let first = detector.take_block().expect("blocks are tracked");
+    assert!(first.tonal_seconds > 0.0);
+    assert!(first.treble[usize::from(C)] > first.treble[usize::from(F_SHARP)]);
+
+    detector.push(&progression(F_SHARP_MAJOR, 0.0));
+    let second = detector.take_block().expect("blocks are tracked");
+    assert!(second.treble[usize::from(F_SHARP)] > second.treble[usize::from(C)]);
+    assert_eq!(
+        detector.take_block().map(|block| block.tonal_seconds),
+        Some(0.0)
+    );
+}
+
+#[test]
+fn blocks_are_off_by_default() {
+    let mut detector = KeyDetector::new(SAMPLE_RATE);
+    detector.push(&progression(C_MAJOR, 0.0));
+    assert_eq!(detector.take_block(), None);
+}

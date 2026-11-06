@@ -300,3 +300,36 @@ fn works_at_44100() {
     let bpm = detector.estimate().bpm.expect("a tempo at 44.1 kHz");
     assert!((bpm - 120.0).abs() <= 1.0, "{bpm}");
 }
+
+/// A kick on every beat.
+const CLICK: Pattern = Pattern {
+    kicks: &[0, 4, 8, 12],
+    snares: &[],
+    hats: &[],
+    roll: &[],
+};
+
+#[test]
+fn recent_estimate_follows_a_tempo_change_before_the_full_estimate() {
+    let audio = [render(&CLICK, 120.0, 20.0), render(&CLICK, 90.0, 8.0)].concat();
+    let detector = detect(&audio);
+    let recent = detector.estimate_recent(6.0).bpm.expect("a recent tempo");
+    let full = detector.estimate().bpm.expect("a tempo");
+    assert!((recent - 90.0).abs() <= 2.0, "recent {recent}");
+    assert!((full - 90.0).abs() > 2.0, "full {full}");
+}
+
+#[test]
+fn recent_estimate_of_the_whole_history_matches_the_estimate() {
+    let detector = detect(&render(&CLICK, 120.0, 12.0));
+    assert_eq!(detector.estimate_recent(60.0), detector.estimate());
+}
+
+#[test]
+fn recent_estimate_needs_the_minimum_history() {
+    let detector = detect(&render(&CLICK, 120.0, 12.0));
+    assert_eq!(
+        detector.estimate_recent(MIN_SECONDS / 2.0),
+        TempoEstimate::NONE
+    );
+}

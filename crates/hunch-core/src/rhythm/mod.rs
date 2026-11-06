@@ -136,15 +136,14 @@ impl TempoDetector {
     }
 
     pub fn estimate(&self) -> TempoEstimate {
-        let Some(analysis) = self.octave_analysis() else {
-            return TempoEstimate::NONE;
-        };
-        // An exact repetition is rhythm evidence even when no beat stands out, e.g. a sparse loop.
-        let has_rhythm = analysis.periodicity > 0.0 || analysis.loop_weight > 0.0;
-        if !has_rhythm {
-            return TempoEstimate::NONE;
-        }
-        decide(&analysis)
+        estimate_from(self.octave_analysis())
+    }
+
+    /// Experimental, for `hunch-eval mix-bench`: the estimate from only the last `seconds` of
+    /// onset history, so a new beat shows before the full history turns over.
+    pub fn estimate_recent(&self, seconds: f32) -> TempoEstimate {
+        let frames = (seconds.max(0.0) * self.onsets.frame_rate()).round() as usize;
+        estimate_from(self.analysis_of_last(frames))
     }
 
     /// The candidates behind the current estimate, related by tempo octave.
@@ -162,14 +161,26 @@ impl TempoDetector {
     /// Everything the current estimate is decided from. `None` until there's enough audio, or when
     /// it's silent.
     pub fn octave_analysis(&self) -> Option<OctaveAnalysis> {
+        self.analysis_of_last(usize::MAX)
+    }
+
+    /// Like `octave_analysis`, over only the last `frames` onset frames.
+    fn analysis_of_last(&self, frames: usize) -> Option<OctaveAnalysis> {
         let frame_rate = self.onsets.frame_rate();
         let history = self.onsets.history();
-        if (history.len() as f32) < MIN_SECONDS * frame_rate {
+        let skip = history.len().saturating_sub(frames);
+        let frame_count = history.len() - skip;
+        if (frame_count as f32) < MIN_SECONDS * frame_rate {
             return None;
         }
 
-        let envelopes: [Vec<f32>; Band::ALL.len()] =
-            Band::ALL.map(|band| history.iter().map(|frame| frame[band.index()]).collect());
+        let envelopes: [Vec<f32>; Band::ALL.len()] = Band::ALL.map(|band| {
+            history
+                .iter()
+                .skip(skip)
+                .map(|frame| frame[band.index()])
+                .collect()
+        });
         let max_lag =
             (MAX_LAG_BEATS * bpm_to_lag(CANDIDATE_MIN_BPM, frame_rate)).ceil() as usize + 1;
         let shortest_repetition =
@@ -206,11 +217,23 @@ impl TempoDetector {
             candidates,
             periodicity: periodicity_factor(PeriodicityInput {
                 strength: strongest.strength,
-                frame_count: history.len(),
+                frame_count,
             }),
             loop_weight: repetition.map_or(0.0, |repetition| repetition.weight()),
         })
     }
+}
+
+fn estimate_from(analysis: Option<OctaveAnalysis>) -> TempoEstimate {
+    let Some(analysis) = analysis else {
+        return TempoEstimate::NONE;
+    };
+    // An exact repetition is rhythm evidence even when no beat stands out, e.g. a sparse loop.
+    let has_rhythm = analysis.periodicity > 0.0 || analysis.loop_weight > 0.0;
+    if !has_rhythm {
+        return TempoEstimate::NONE;
+    }
+    decide(&analysis)
 }
 
 struct CandidateSources<'a> {

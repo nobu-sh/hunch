@@ -31,6 +31,10 @@ impl PitchHistogram {
         self.bins[bin] += weight;
     }
 
+    pub fn scale(&mut self, factor: f32) {
+        self.bins.iter_mut().for_each(|bin| *bin *= factor);
+    }
+
     pub fn reset(&mut self) {
         self.bins.fill(0.0);
     }

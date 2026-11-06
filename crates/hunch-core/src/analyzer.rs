@@ -1,6 +1,6 @@
 use crate::Key;
 use crate::rhythm::TempoDetector;
-use crate::tonal::KeyDetector;
+use crate::tonal::{KeyDetector, KeyDetectorConfig};
 
 /// How much newly pushed audio, in seconds, is needed before the next estimate.
 const ESTIMATE_INTERVAL_SECONDS: f32 = 0.5;
@@ -32,11 +32,16 @@ pub struct Analyzer {
 
 impl Analyzer {
     pub fn new(sample_rate: u32) -> Self {
+        Self::with_key_config(sample_rate, KeyDetectorConfig::default())
+    }
+
+    /// Experimental, for `hunch-eval mix-bench`: an analyzer whose key detector uses `key_config`.
+    pub fn with_key_config(sample_rate: u32, key_config: KeyDetectorConfig) -> Self {
         // A zero rate would make the cadence math divide by zero; treat it as 1 Hz.
         let sample_rate = sample_rate.max(1);
         Self {
             sample_rate,
-            key: KeyDetector::new(sample_rate),
+            key: KeyDetector::with_config(sample_rate, key_config),
             tempo: TempoDetector::new(sample_rate),
             samples_per_estimate: ((sample_rate as f32 * ESTIMATE_INTERVAL_SECONDS) as u64).max(1),
             total_samples: 0,
@@ -74,6 +79,18 @@ impl Analyzer {
     /// How many more samples `push` needs before it returns the next estimate.
     pub fn samples_until_estimate(&self) -> u64 {
         self.samples_per_estimate - self.samples_since_estimate
+    }
+
+    /// Experimental, for `hunch-eval mix-bench`: lets it read blocks from the key detector
+    /// (`KeyDetector::take_block`).
+    pub fn key_detector_mut(&mut self) -> &mut KeyDetector {
+        &mut self.key
+    }
+
+    /// Experimental, for `hunch-eval mix-bench`: lets it read recent tempo estimates
+    /// (`TempoDetector::estimate_recent`).
+    pub fn tempo_detector(&self) -> &TempoDetector {
+        &self.tempo
     }
 
     /// The estimate for everything pushed so far, regardless of the push cadence.
