@@ -46,6 +46,11 @@ const CUSUM_HALF_SECONDS: f32 = 1.5;
 const RECENT_TICKS: usize = ticks(RECENT_SECONDS);
 const SUSTAIN_TICKS: usize = ticks(SUSTAIN_SECONDS);
 
+/// How far before the estimate that reports a change its change point can be: the lookback before
+/// the run of disagreement, plus the run.
+pub(crate) const MAX_CHANGE_AGE_SECONDS: f32 =
+    LOOKBACK_SECONDS + (SUSTAIN_TICKS - 1) as f32 * ESTIMATE_INTERVAL_SECONDS;
+
 const fn ticks(seconds: f32) -> usize {
     (seconds / ESTIMATE_INTERVAL_SECONDS) as usize
 }
@@ -197,8 +202,7 @@ impl ChangeDetector {
         let new_lag = 60.0 / new_bpm * frame_rate;
         let half = (CUSUM_HALF_SECONDS * frame_rate) as usize;
 
-        let run_start = now_seconds - (SUSTAIN_TICKS - 1) as f32 * ESTIMATE_INTERVAL_SECONDS;
-        let earliest = (run_start - LOOKBACK_SECONDS).max(MIN_CHANGE_SECONDS);
+        let earliest = (now_seconds - MAX_CHANGE_AGE_SECONDS).max(MIN_CHANGE_SECONDS);
         let mut suffix = 0.0;
         let mut best_sum = f32::NEG_INFINITY;
         let mut best = now_seconds;

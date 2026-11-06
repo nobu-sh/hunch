@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use hunch_capture::{Source, SourceKind};
-use hunch_core::{Estimate, SessionEvent};
+use hunch_core::{Estimate, SessionEvent, WindowEndReason, WindowStartReason};
 
 pub fn sources(sources: &[Source]) {
     let devices = sources
@@ -34,7 +34,16 @@ pub fn session_event(timed: TimedEvent<'_>) {
         SessionEvent::WindowStarted {
             window_id,
             at_seconds,
-        } => println!("[{at:6.1}s] window {window_id} started at {at_seconds:.1} s of audio"),
+            reason,
+        } => {
+            let cause = match reason {
+                WindowStartReason::Sound => "sound",
+                WindowStartReason::Change => "a tempo change",
+            };
+            println!(
+                "[{at:6.1}s] window {window_id} started at {at_seconds:.1} s of audio, on {cause}"
+            );
+        }
         SessionEvent::Estimate {
             window_id,
             estimate,
@@ -47,11 +56,17 @@ pub fn session_event(timed: TimedEvent<'_>) {
             estimate,
             duration_seconds,
             too_short,
+            reason,
         } => {
             let result = estimate.as_ref().map_or("no estimate".to_owned(), describe);
             let short = if *too_short { " (too short)" } else { "" };
+            let cause = match reason {
+                WindowEndReason::Silence => "silence",
+                WindowEndReason::Change => "a tempo change",
+                WindowEndReason::Finished => "the end of the stream",
+            };
             println!(
-                "[{at:6.1}s] window {window_id} ended after {duration_seconds:.1} s{short}: {result}"
+                "[{at:6.1}s] window {window_id} ended on {cause} after {duration_seconds:.1} s{short}: {result}"
             );
         }
     }
