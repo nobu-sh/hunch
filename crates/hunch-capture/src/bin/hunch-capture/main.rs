@@ -1,8 +1,11 @@
-//! Lists audio sources and prints `hunch-core` session events live from one of them.
+//! Lists audio sources and prints `hunch-core` session events live from one of them, optionally
+//! recording what it analyzed.
 
 mod listen;
 mod print;
+mod record;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -29,6 +32,9 @@ enum Command {
         /// Stop after this many seconds. Runs until the source ends or Ctrl+C otherwise.
         #[arg(long)]
         seconds: Option<f32>,
+        /// Also write the analyzed audio (mono, 22,050 Hz, 32-bit float) to this WAV file.
+        #[arg(long, value_name = "FILE")]
+        record: Option<PathBuf>,
     },
 }
 
@@ -37,10 +43,15 @@ fn main() -> ExitCode {
     let backend = default_backend();
     let result = match cli.command {
         Command::List => list(backend.as_ref()),
-        Command::Listen { id, seconds } => listen::run(listen::ListenArgs {
+        Command::Listen {
+            id,
+            seconds,
+            record,
+        } => listen::run(listen::ListenArgs {
             backend: backend.as_ref(),
             id: SourceId::new(id),
             seconds,
+            record,
         }),
     };
     match result {

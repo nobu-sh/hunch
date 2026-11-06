@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use hunch_capture::{
@@ -6,6 +7,7 @@ use hunch_capture::{
 use hunch_core::{Session, SessionEvent};
 
 use crate::print;
+use crate::record::Recorder;
 
 /// How often the loop wakes without audio, to check the time limit.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -14,6 +16,8 @@ pub struct ListenArgs<'a> {
     pub backend: &'a dyn AudioBackend,
     pub id: SourceId,
     pub seconds: Option<f32>,
+    /// Also write the analyzed audio here as a WAV.
+    pub record: Option<PathBuf>,
 }
 
 pub fn run(args: ListenArgs<'_>) -> Result<(), String> {
@@ -30,6 +34,13 @@ pub fn run(args: ListenArgs<'_>) -> Result<(), String> {
 
     let mut feed = AnalysisFeed::new(format).map_err(|error| error.to_string())?;
     let mut session = Session::new(ANALYSIS_SAMPLE_RATE);
+    let mut recorder = match &args.record {
+        Some(path) => {
+            println!("recording to {}", path.display());
+            Some(Recorder::create(path)?)
+        }
+        None => None,
+    };
     let mut summary = Summary::default();
     let started = Instant::now();
     let deadline = args
@@ -45,8 +56,15 @@ pub fn run(args: ListenArgs<'_>) -> Result<(), String> {
             None => {}
             Some(StreamEvent::Frames(samples)) => {
                 let mut events = Vec::new();
-                feed.push(&samples, |chunk| events.extend(session.push(chunk)))
-                    .map_err(|error| error.to_string())?;
+                let mut write_result = Ok(());
+                feed.push(&samples, |chunk| {
+                    if let (Some(recorder), true) = (&mut recorder, write_result.is_ok()) {
+                        write_result = recorder.write(chunk);
+                    }
+                    events.extend(session.push(chunk));
+                })
+                .map_err(|error| error.to_string())?;
+                write_result?;
                 for event in &events {
                     summary.record(event);
                     print::session_event(print::TimedEvent {
@@ -65,6 +83,9 @@ pub fn run(args: ListenArgs<'_>) -> Result<(), String> {
         }
     }
     summary.print();
+    if let Some(recorder) = recorder {
+        recorder.finish()?;
+    }
     Ok(())
 }
 

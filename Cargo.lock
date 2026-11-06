@@ -1448,6 +1448,7 @@ name = "hunch-capture"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "hound",
  "hunch-core",
  "rubato",
  "wasapi",
