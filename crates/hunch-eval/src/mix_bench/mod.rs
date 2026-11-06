@@ -36,7 +36,7 @@ use crate::{DEFAULT_DATA_DIR, SplitChoice, run};
 const AFTER_CHANGE_SECONDS: [f32; 5] = [5.0, 10.0, 20.0, 30.0, 45.0];
 /// Single tracks are scored at these times.
 const SINGLE_TRACK_SECONDS: [f32; 4] = [30.0, 60.0, 90.0, 115.0];
-const FORGET_SECONDS: [f32; 3] = [30.0, 60.0, 90.0];
+const FORGET_SECONDS: [f32; 4] = [30.0, 45.0, 60.0, 90.0];
 /// Forgetting paired with each pick's splits in the downstream tables.
 const COMBINED_FORGET_SECONDS: f32 = 30.0;
 /// False-split budgets the per-category table reports the best recall at.
@@ -100,17 +100,19 @@ struct SingleRun {
     baselines: Vec<Readouts>,
 }
 
+/// The default key config with this forgetting, so rows don't shift when the default does.
+fn key_config(forget_seconds: Option<f32>) -> KeyDetectorConfig {
+    KeyDetectorConfig {
+        forget_seconds,
+        ..KeyDetectorConfig::default()
+    }
+}
+
 /// No splitting, with and without key-evidence forgetting.
 fn baselines() -> Vec<(String, KeyDetectorConfig)> {
-    let mut list = vec![("no split".to_string(), KeyDetectorConfig::default())];
+    let mut list = vec![("no split".to_string(), key_config(None))];
     for seconds in FORGET_SECONDS {
-        list.push((
-            format!("forget {seconds:.0}s"),
-            KeyDetectorConfig {
-                forget_seconds: Some(seconds),
-                ..KeyDetectorConfig::default()
-            },
-        ));
+        list.push((format!("forget {seconds:.0}s"), key_config(Some(seconds))));
     }
     list
 }
@@ -660,16 +662,13 @@ struct SplitVariant {
     key_config: KeyDetectorConfig,
 }
 
-/// Every pick as is, then with key forgetting on top.
+/// Every pick keeping all key evidence, then with key forgetting on top.
 fn split_variants(input: &DownstreamInput) -> Vec<SplitVariant> {
-    let forgetting = KeyDetectorConfig {
-        forget_seconds: Some(COMBINED_FORGET_SECONDS),
-        ..KeyDetectorConfig::default()
-    };
+    let forgetting = key_config(Some(COMBINED_FORGET_SECONDS));
     let plain = input.picks.iter().map(|&pick| SplitVariant {
         name: input.configs[pick].0.clone(),
         pick,
-        key_config: KeyDetectorConfig::default(),
+        key_config: key_config(None),
     });
     let combined = input.picks.iter().map(|&pick| SplitVariant {
         name: format!(
@@ -960,12 +959,8 @@ fn print_cpu(input: &CpuInput) -> Result<(), String> {
             analyzer.push(chunk);
         });
     });
-    let forgetting = time(&|samples| {
-        let config = KeyDetectorConfig {
-            forget_seconds: Some(COMBINED_FORGET_SECONDS),
-            ..KeyDetectorConfig::default()
-        };
-        let mut analyzer = Analyzer::with_key_config(ANALYSIS_SAMPLE_RATE, config);
+    let keeping = time(&|samples| {
+        let mut analyzer = Analyzer::with_key_config(ANALYSIS_SAMPLE_RATE, key_config(None));
         samples.chunks(run::chunk_len()).for_each(|chunk| {
             analyzer.push(chunk);
         });
@@ -1025,10 +1020,7 @@ fn print_cpu(input: &CpuInput) -> Result<(), String> {
     println!("|---|---|---|");
     println!("| analyzer (shipped) | {plain:.3} | 100% |");
     let rows = [
-        (
-            format!("analyzer with key forgetting ({COMBINED_FORGET_SECONDS:.0} s)"),
-            forgetting,
-        ),
+        ("analyzer keeping all key evidence".to_string(), keeping),
         ("analyzer + 0.5 s chroma blocks".to_string(), blocks),
         (
             format!(
