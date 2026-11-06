@@ -1,7 +1,7 @@
-// What both Hunch mixins do: play the test beat, turn Hunch on, and follow the tab's session.
+// What the Hunch mixins do: play a test page, turn Hunch on, and follow the tab's session.
 import type { LoadedExtension, MixinContext } from '@hunch/browser';
-import type { SessionState } from '@hunch/ui';
-import { TargetType, type WebWorker } from 'puppeteer-core';
+import type { SessionEvent, SessionState } from '@hunch/ui';
+import { type Browser, TargetType, type WebWorker } from 'puppeteer-core';
 import { formatSession } from './session.ts';
 import { type TestBeatServer, waitForTestBeat } from './test-beat.ts';
 
@@ -14,10 +14,11 @@ const MS_PER_SECOND = 1000;
 /** How long a failed read waits to see whether the browser is closing rather than broken. */
 const CLOSE_GRACE_MS = 2_000;
 
-/** Minimal shape of the extension APIs `readTabSession` uses in the service worker. */
+/** Minimal shape of the extension APIs the mixins use in the service worker. */
 interface ExtensionApis {
   tabs: { query: (query: object) => Promise<{ id?: number; url?: string }[]> };
   storage: { session: { get: (key: string) => Promise<Record<string, unknown>> } };
+  runtime: { onMessage: { addListener: (listener: (message: unknown) => void) => void } };
 }
 
 /**
@@ -36,13 +37,54 @@ export async function turnOnHunch(params: {
   context.log('Hunch is on.');
 
   const pageUrl = page.url();
+  const worker = await hunchWorker({ browser, hunch });
+  return () => readTabSession({ worker, pageUrl });
+}
+
+async function hunchWorker(params: {
+  browser: Browser;
+  hunch: LoadedExtension;
+}): Promise<WebWorker> {
+  const { browser, hunch } = params;
   const workerTarget = await browser.waitForTarget(
     (target) =>
       target.type() === TargetType.SERVICE_WORKER && target.url().startsWith(hunch.urlPrefix),
   );
   const worker = await workerTarget.worker();
   if (!worker) throw new Error(`Hunch's service worker at ${workerTarget.url()} isn't running`);
-  return () => readTabSession({ worker, pageUrl });
+  return worker;
+}
+
+/** The window start and end events the service worker has heard, kept by `recordWindowEvents`. */
+const WINDOW_EVENTS_GLOBAL = '__hunchDevWindowEvents';
+
+/**
+ * Keeps every `windowStarted` and `windowEnded` session event Hunch's service worker receives
+ * from now on, since the stored session state doesn't say why windows started or ended. Returns
+ * a reader for them, oldest first.
+ */
+export async function recordWindowEvents(
+  context: MixinContext,
+): Promise<() => Promise<SessionEvent[]>> {
+  const worker = await hunchWorker({
+    browser: context.browser,
+    hunch: hunchExtension(context.extensions),
+  });
+  await worker.evaluate((globalName) => {
+    const scope = globalThis as unknown as Record<string, unknown> & { chrome: ExtensionApis };
+    const events: unknown[] = [];
+    scope[globalName] = events;
+    scope.chrome.runtime.onMessage.addListener((message) => {
+      const { type, event } = message as { type?: string; event?: { type?: string } };
+      const isWindowEvent = event?.type === 'windowStarted' || event?.type === 'windowEnded';
+      if (type === 'session-event' && isWindowEvent) events.push(event);
+    });
+  }, WINDOW_EVENTS_GLOBAL);
+  return () =>
+    worker.evaluate(
+      (globalName) => (globalThis as unknown as Record<string, SessionEvent[]>)[globalName] ?? [],
+      WINDOW_EVENTS_GLOBAL,
+    );
 }
 
 function hunchExtension(extensions: LoadedExtension[]): LoadedExtension {

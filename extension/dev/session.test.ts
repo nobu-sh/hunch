@@ -1,6 +1,12 @@
-import type { Estimate, SessionState, WindowState } from '@hunch/ui';
+import type { Estimate, SessionEvent, SessionState, WindowState } from '@hunch/ui';
 import { describe, expect, it } from 'vitest';
-import { checkTestBeatSession, formatSession, latestEstimate } from './session.ts';
+import {
+  checkTestBeatSession,
+  checkTestMixSession,
+  formatSession,
+  formatWindowEvent,
+  latestEstimate,
+} from './session.ts';
 
 const estimate: Estimate = {
   key: 'A minor',
@@ -97,5 +103,74 @@ describe('checkTestBeatSession', () => {
     expect(
       checkTestBeatSession({ state: { ...state, error: 'boom' }, errors: ['page: x'] }),
     ).toEqual(['the session reported an error: boom', 'console error: page: x']);
+  });
+});
+
+describe('checkTestMixSession', () => {
+  const oldEstimate = { ...estimate, bpm: 120 };
+  const newEstimate = { ...estimate, key: 'F# minor', bpm: 140 };
+  const split: SessionEvent[] = [
+    {
+      type: 'windowEnded',
+      windowId: 1,
+      estimate: oldEstimate,
+      durationSeconds: 40,
+      tooShort: false,
+      reason: 'change',
+    },
+    { type: 'windowStarted', windowId: 2, atSeconds: 40, reason: 'change' },
+  ];
+  const splitState: SessionState = {
+    ...state,
+    window: { ...currentWindow, recentEstimates: [newEstimate] },
+    history: [{ windowId: 1, endedAt: 0, durationSeconds: 40, estimate: oldEstimate }],
+  };
+
+  it('passes a change from the old tempo to the new', () => {
+    expect(checkTestMixSession({ state: splitState, windowEvents: split, errors: [] })).toEqual([]);
+  });
+
+  it('fails without a window that ended on a change', () => {
+    const windowEvents = split.map((event) =>
+      event.type === 'windowEnded' ? { ...event, reason: 'silence' as const } : event,
+    );
+    expect(checkTestMixSession({ state: splitState, windowEvents, errors: [] })).toEqual([
+      'no window ended on a tempo change',
+    ]);
+  });
+
+  it('fails when the new window still reads the old tempo', () => {
+    const window = { ...currentWindow, recentEstimates: [oldEstimate] };
+    expect(
+      checkTestMixSession({ state: { ...splitState, window }, windowEvents: split, errors: [] }),
+    ).toEqual(['the new window has bpm 120.0, not near 140']);
+  });
+
+  it('fails when the old window left no history row', () => {
+    expect(
+      checkTestMixSession({
+        state: { ...splitState, history: [] },
+        windowEvents: split,
+        errors: [],
+      }),
+    ).toEqual(['window 1 has no history row']);
+  });
+});
+
+describe('formatWindowEvent', () => {
+  it('says why a window started and ended', () => {
+    expect(
+      formatWindowEvent({ type: 'windowStarted', windowId: 2, atSeconds: 40, reason: 'change' }),
+    ).toBe('window 2 started at 40.0 s on change');
+    expect(
+      formatWindowEvent({
+        type: 'windowEnded',
+        windowId: 1,
+        estimate,
+        durationSeconds: 40,
+        tooShort: false,
+        reason: 'change',
+      }),
+    ).toBe('window 1 ended on change after 40.0 s: key A minor, bpm 120.2');
   });
 });

@@ -1,28 +1,52 @@
-//! The dev source: the same beat as `extension/dev/test-beat.ts`
-//! (120 BPM, A natural minor: Am, Dm, Em, Am with kick, snare and hats), synthesized here and
-//! played in real time.
+//! The dev sources, synthesized here and played in real time:
+//! - the test beat, the same as `extension/dev/test-beat.ts` (120 BPM, A natural minor: Am, Dm,
+//!   Em, Am with kick, snare and hats);
+//! - the test mix, the same as `extension/dev/test-mix.ts`: 40 s of the test beat, then straight
+//!   into 140 BPM in F# minor for 41 s, with no gap, looping. Hunch should split on each change.
 
 use std::f32::consts::{PI, TAU};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::feed::{AudioFeed, FeedEvent};
+use crate::sources::DevSource;
 
 /// The session's native rate, so the feed needs no resampling.
 const SAMPLE_RATE: u32 = 22_050;
 const CHUNK_SECONDS: f32 = 0.1;
 
-const BPM: f32 = 120.0;
-const BEAT_SECONDS: f32 = 60.0 / BPM;
-const BAR_SECONDS: f32 = BEAT_SECONDS * 4.0;
-const LOOP_BARS: usize = 16;
 const BEATS_PER_BAR: usize = 4;
 /// MIDI notes per bar: the bass, then the chord.
-const CHORDS: [[u8; 4]; 4] = [
+type Chord = [u8; 4];
+const A_MINOR_CHORDS: [Chord; 4] = [
     [45, 57, 60, 64], // Am: A2 bass, A3 C4 E4
     [50, 62, 65, 69], // Dm
     [52, 64, 67, 71], // Em
     [45, 57, 60, 64], // Am
+];
+/// The A minor progression a minor third down.
+const F_SHARP_MINOR_CHORDS: [Chord; 4] = [
+    [42, 54, 57, 61], // F#m
+    [47, 59, 62, 66], // Bm
+    [49, 61, 64, 68], // C#m
+    [42, 54, 57, 61], // F#m
+];
+const TEST_BEAT: Song = Song {
+    bpm: 120.0,
+    bars: 16,
+    chords: A_MINOR_CHORDS,
+};
+const TEST_MIX: [Song; 2] = [
+    Song {
+        bpm: 120.0,
+        bars: 20,
+        chords: A_MINOR_CHORDS,
+    },
+    Song {
+        bpm: 140.0,
+        bars: 24,
+        chords: F_SHARP_MINOR_CHORDS,
+    },
 ];
 const MASTER_GAIN: f32 = 0.5;
 
@@ -56,7 +80,7 @@ const HAT: Hit = Hit {
 };
 const OFFBEAT_HAT_GAIN: f32 = 0.1;
 
-/// Loops the rendered beat, handing out each chunk once it would have finished playing.
+/// Loops a rendered dev source, handing out each chunk once it would have finished playing.
 pub struct TestBeatFeed {
     samples: Vec<f32>,
     position: usize,
@@ -65,9 +89,9 @@ pub struct TestBeatFeed {
 }
 
 impl TestBeatFeed {
-    pub fn new() -> Self {
+    pub fn new(source: DevSource) -> Self {
         Self {
-            samples: render(SAMPLE_RATE),
+            samples: render_source(source),
             position: 0,
             samples_sent: 0,
             started: Instant::now(),
@@ -100,6 +124,35 @@ impl AudioFeed for TestBeatFeed {
     }
 }
 
+/// One loop of a dev source, mono at the session's rate.
+fn render_source(source: DevSource) -> Vec<f32> {
+    match source {
+        DevSource::TestBeat => render(TEST_BEAT, SAMPLE_RATE),
+        DevSource::TestMix => TEST_MIX
+            .iter()
+            .flat_map(|&song| render(song, SAMPLE_RATE))
+            .collect(),
+    }
+}
+
+/// A looped chord progression over the drum pattern.
+#[derive(Clone, Copy)]
+struct Song {
+    bpm: f32,
+    bars: usize,
+    chords: [Chord; 4],
+}
+
+impl Song {
+    fn beat_seconds(&self) -> f32 {
+        60.0 / self.bpm
+    }
+
+    fn bar_seconds(&self) -> f32 {
+        self.beat_seconds() * BEATS_PER_BAR as f32
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Wave {
     Triangle,
@@ -122,22 +175,24 @@ struct Hit {
     highpass_hz: f32,
 }
 
-/// One loop of the beat, mono at `sample_rate`.
-fn render(sample_rate: u32) -> Vec<f32> {
-    let length = (LOOP_BARS as f32 * BAR_SECONDS * sample_rate as f32).ceil() as usize;
+/// `song`'s bars, mono at `sample_rate`.
+fn render(song: Song, sample_rate: u32) -> Vec<f32> {
+    let beat_seconds = song.beat_seconds();
+    let bar_seconds = song.bar_seconds();
+    let length = (song.bars as f32 * bar_seconds * sample_rate as f32).ceil() as usize;
     let mut mix = Mix {
         samples: vec![0.0; length],
         sample_rate: sample_rate as f32,
         noise: noise((NOISE_SECONDS * sample_rate as f32) as usize),
     };
 
-    for bar in 0..LOOP_BARS {
-        let bar_start = bar as f32 * BAR_SECONDS;
-        let [bass, chord @ ..] = CHORDS[bar % CHORDS.len()];
+    for bar in 0..song.bars {
+        let bar_start = bar as f32 * bar_seconds;
+        let [bass, chord @ ..] = song.chords[bar % song.chords.len()];
         mix.add_tone(Tone {
             midi: bass,
             start: bar_start,
-            length: BAR_SECONDS,
+            length: bar_seconds,
             gain: BASS_GAIN,
             wave: Wave::Triangle,
         });
@@ -145,13 +200,13 @@ fn render(sample_rate: u32) -> Vec<f32> {
             mix.add_tone(Tone {
                 midi,
                 start: bar_start,
-                length: BAR_SECONDS,
+                length: bar_seconds,
                 gain: CHORD_GAIN,
                 wave: Wave::Sawtooth,
             });
         }
         for beat in 0..BEATS_PER_BAR {
-            let beat_start = bar_start + beat as f32 * BEAT_SECONDS;
+            let beat_start = bar_start + beat as f32 * beat_seconds;
             let is_kick_beat = beat % 2 == 0;
             if is_kick_beat {
                 mix.add_kick(beat_start);
@@ -166,7 +221,7 @@ fn render(sample_rate: u32) -> Vec<f32> {
                 ..HAT
             });
             mix.add_hit(Hit {
-                start: beat_start + BEAT_SECONDS / 2.0,
+                start: beat_start + beat_seconds / 2.0,
                 gain: OFFBEAT_HAT_GAIN,
                 ..HAT
             });

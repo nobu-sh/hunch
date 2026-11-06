@@ -1,15 +1,47 @@
-//! What the app can listen to: capture sources plus, in debug builds, the synthesized test beat.
+//! What the app can listen to: capture sources plus, in debug builds, the synthesized dev sources.
 
 use hunch_capture::{Source, SourceKind};
 use serde::Serialize;
 
 use crate::remembered::RememberedSource;
 
-/// The test beat's id in `list_sources`. Debug builds only.
-pub const DEV_SOURCE_ID: &str = "dev:test-beat";
-const DEV_SOURCE_NAME: &str = "Test beat (dev)";
-/// Whether this build offers the dev source.
+/// Whether this build offers the dev sources.
 pub const HAS_DEV_SOURCE: bool = cfg!(debug_assertions);
+
+/// A synthesized source for development (`test_beat`). Debug builds only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DevSource {
+    /// 120 BPM in A minor.
+    TestBeat,
+    /// The test beat straight into 140 BPM in F# minor, looping: a track change without a pause.
+    TestMix,
+}
+
+impl DevSource {
+    pub const ALL: [DevSource; 2] = [DevSource::TestBeat, DevSource::TestMix];
+
+    /// Its id in `list_sources`.
+    pub fn id(self) -> &'static str {
+        match self {
+            DevSource::TestBeat => "dev:test-beat",
+            DevSource::TestMix => "dev:test-mix",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            DevSource::TestBeat => "Test beat (dev)",
+            DevSource::TestMix => "Test mix (dev)",
+        }
+    }
+
+    /// The source a `HUNCH_DEV_SOURCE` value asks for: `test-beat` or `test-mix`.
+    pub fn from_variable(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|source| source.id().strip_prefix("dev:") == Some(value))
+    }
+}
 
 /// A source as the UI sees it, from `list_sources` and `current_source`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -41,21 +73,21 @@ pub struct SourceListDto {
 /// Something a session can listen to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Listenable {
-    TestBeat,
+    Dev(DevSource),
     Capture(Source),
 }
 
 impl Listenable {
     pub fn id(&self) -> &str {
         match self {
-            Listenable::TestBeat => DEV_SOURCE_ID,
+            Listenable::Dev(source) => source.id(),
             Listenable::Capture(source) => source.id.as_str(),
         }
     }
 
     pub fn name(&self) -> &str {
         match self {
-            Listenable::TestBeat => DEV_SOURCE_NAME,
+            Listenable::Dev(source) => source.name(),
             Listenable::Capture(source) => &source.name,
         }
     }
@@ -64,21 +96,21 @@ impl Listenable {
         matches!(self, Listenable::Capture(source) if source.kind == SourceKind::App)
     }
 
-    /// Apps and output devices should carry sound; a mic or the test beat may rightly be quiet
+    /// Apps and output devices should carry sound; a mic or a dev source may rightly be quiet
     /// or can't be.
     pub fn watches_for_silence(&self) -> bool {
         match self {
-            Listenable::TestBeat => false,
+            Listenable::Dev(_) => false,
             Listenable::Capture(source) => source.kind == SourceKind::App || source.is_output,
         }
     }
 
     pub fn to_dto(&self) -> SourceDto {
         match self {
-            Listenable::TestBeat => SourceDto {
-                id: DEV_SOURCE_ID.to_owned(),
+            Listenable::Dev(source) => SourceDto {
+                id: source.id().to_owned(),
                 kind: SourceKindDto::Device,
-                name: DEV_SOURCE_NAME.to_owned(),
+                name: source.name().to_owned(),
                 is_default: false,
                 is_output: false,
             },
@@ -101,7 +133,7 @@ pub struct Available {
     pub includes_dev_source: bool,
 }
 
-/// Every capture source, then the dev source when it's included.
+/// Every capture source, then the dev sources when they're included.
 pub fn listenables(available: Available) -> Vec<Listenable> {
     let mut listenables: Vec<Listenable> = available
         .sources
@@ -109,7 +141,7 @@ pub fn listenables(available: Available) -> Vec<Listenable> {
         .map(Listenable::Capture)
         .collect();
     if available.includes_dev_source {
-        listenables.push(Listenable::TestBeat);
+        listenables.extend(DevSource::ALL.map(Listenable::Dev));
     }
     listenables
 }
@@ -122,16 +154,16 @@ pub struct StartChoice<'a> {
     pub listenables: &'a [Listenable],
     /// The source the user last selected, if one was saved.
     pub remembered: Option<&'a RememberedSource>,
-    /// `HUNCH_DEV_SOURCE=test-beat` asked for the test beat.
-    pub wants_dev_source: bool,
+    /// The dev source `HUNCH_DEV_SOURCE` asked for (`test-beat` or `test-mix`).
+    pub wanted_dev_source: Option<DevSource>,
 }
 
 /// What `listen` starts: the dev source when asked for, else the remembered source while it's
 /// still around (see `find_remembered`), else the default output device. `None` when none of
 /// those exist.
 pub fn choose_start(choice: StartChoice<'_>) -> Option<Listenable> {
-    if choice.wants_dev_source {
-        if let Some(dev) = find(choice.listenables, DEV_SOURCE_ID) {
+    if let Some(dev_source) = choice.wanted_dev_source {
+        if let Some(dev) = find(choice.listenables, dev_source.id()) {
             return Some(dev.clone());
         }
     }

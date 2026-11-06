@@ -1,6 +1,7 @@
 use std::f32::consts::PI;
 
 use super::*;
+use crate::test_audio::beat;
 
 const SAMPLE_RATE: u32 = 22_050;
 /// Window boundaries snap to the segmenter's ~50 ms frames, and a frame only partly filled with
@@ -56,10 +57,12 @@ fn run(signal: &[f32], chunk_size: usize) -> Vec<SessionEvent> {
 struct Window {
     id: u32,
     at_seconds: f32,
-    estimate_count: usize,
+    start_reason: WindowStartReason,
+    estimates: Vec<Estimate>,
     estimate: Option<Estimate>,
     duration_seconds: f32,
     too_short: bool,
+    end_reason: Option<WindowEndReason>,
 }
 
 /// Collects ended windows, checking that every event belongs to the window that's open.
@@ -71,38 +74,60 @@ fn ended_windows(events: &[SessionEvent]) -> Vec<Window> {
             SessionEvent::WindowStarted {
                 window_id,
                 at_seconds,
+                reason,
             } => {
                 assert!(open.is_none(), "window {window_id} started inside another");
                 open = Some(Window {
                     id: *window_id,
                     at_seconds: *at_seconds,
-                    estimate_count: 0,
+                    start_reason: *reason,
+                    estimates: Vec::new(),
                     estimate: None,
                     duration_seconds: 0.0,
                     too_short: false,
+                    end_reason: None,
                 });
             }
-            SessionEvent::Estimate { window_id, .. } => {
+            SessionEvent::Estimate {
+                window_id,
+                estimate,
+            } => {
                 let window = open.as_mut().expect("estimate outside a window");
                 assert_eq!(window.id, *window_id);
-                window.estimate_count += 1;
+                window.estimates.push(estimate.clone());
             }
             SessionEvent::WindowEnded {
                 window_id,
                 estimate,
                 duration_seconds,
                 too_short,
+                reason,
             } => {
                 let mut window = open.take().expect("end outside a window");
                 assert_eq!(window.id, *window_id);
                 window.estimate = estimate.clone();
                 window.duration_seconds = *duration_seconds;
                 window.too_short = *too_short;
+                window.end_reason = Some(*reason);
                 windows.push(window);
             }
         }
     }
     windows
+}
+
+fn reasons(window: &Window) -> (WindowStartReason, Option<WindowEndReason>) {
+    (window.start_reason, window.end_reason)
+}
+
+/// Within `tolerance` of `bpm`, or of half or double it.
+fn is_bpm_or_octave(estimate: &Estimate, bpm: f32) -> bool {
+    let tolerance = 3.0;
+    estimate.bpm.is_some_and(|actual| {
+        [bpm / 2.0, bpm, bpm * 2.0]
+            .iter()
+            .any(|target| (actual - target).abs() <= tolerance)
+    })
 }
 
 fn assert_near(actual: f32, expected: f32, what: &str) {
@@ -146,7 +171,10 @@ fn tone_silence_tone_gives_two_windows() {
     assert_near(second.at_seconds, 6.0, "second start");
     assert_near(end_seconds(second), 11.0, "second end");
     assert!(!second.too_short);
-    assert!((9..=10).contains(&second.estimate_count));
+    assert!((9..=10).contains(&second.estimates.len()));
+    let silence_window = (WindowStartReason::Sound, Some(WindowEndReason::Silence));
+    assert_eq!(reasons(first), silence_window);
+    assert_eq!(reasons(second), silence_window);
 }
 
 #[test]
@@ -268,6 +296,7 @@ fn finish_ends_the_open_window_with_its_final_estimate() {
     assert_near(end_seconds(&windows[0]), 6.0, "end");
     assert!(!windows[0].too_short);
     assert_analyzed_whole_window(&windows[0]);
+    assert_eq!(windows[0].end_reason, Some(WindowEndReason::Finished));
 }
 
 #[test]
@@ -313,4 +342,173 @@ fn a_finished_session_keeps_counting() {
     assert_eq!(windows.len(), 1);
     assert_eq!(windows[0].id, 2);
     assert_near(windows[0].at_seconds, 6.0, "start");
+}
+
+/// 30 s at 120 BPM straight into 30 s at 140 BPM, then silence.
+fn tempo_step() -> Vec<f32> {
+    [beat(120.0, 30.0), beat(140.0, 30.0), silence(2.0)].concat()
+}
+
+#[test]
+fn a_tempo_step_splits_the_window_at_the_step() {
+    let windows = ended_windows(&run(&tempo_step(), 2_205));
+
+    assert_eq!(windows.len(), 2);
+    let [old, new] = &windows[..] else {
+        unreachable!()
+    };
+    assert_eq!((old.id, new.id), (1, 2));
+    assert_eq!(
+        reasons(old),
+        (WindowStartReason::Sound, Some(WindowEndReason::Change))
+    );
+    assert_eq!(
+        reasons(new),
+        (WindowStartReason::Change, Some(WindowEndReason::Silence))
+    );
+    assert!(
+        (end_seconds(old) - 30.0).abs() <= 1.0,
+        "change at {}",
+        end_seconds(old)
+    );
+    assert!(!old.too_short);
+    assert!(
+        is_bpm_or_octave(final_estimate(old), 120.0),
+        "{:?}",
+        old.estimate
+    );
+    assert!(
+        is_bpm_or_octave(final_estimate(new), 140.0),
+        "{:?}",
+        new.estimate
+    );
+}
+
+#[test]
+fn a_split_leaves_no_gap_or_overlap() {
+    let windows = ended_windows(&run(&tempo_step(), 2_205));
+    let [old, new] = &windows[..] else {
+        panic!("expected two windows, got {}", windows.len())
+    };
+
+    // The new window starts on the sample where the old one ended.
+    assert_eq!(new.at_seconds, end_seconds(old));
+    // The old window's estimate is the one at the change point, of exactly its audio.
+    assert_analyzed_whole_window(old);
+    // The new window was analyzed from the change point: every half second of it, once.
+    assert_analyzed_whole_window(new);
+    let expected_estimates = (new.duration_seconds / 0.5).floor() as usize;
+    assert_eq!(new.estimates.len(), expected_estimates);
+    for (index, estimate) in new.estimates.iter().enumerate() {
+        let expected_seconds = (index + 1) as f32 * 0.5;
+        assert!(
+            (estimate.seconds_analyzed - expected_seconds).abs() < 1e-3,
+            "estimate {index} at {} s",
+            estimate.seconds_analyzed
+        );
+    }
+}
+
+#[test]
+fn chunked_pushes_split_like_one_push() {
+    let signal = tempo_step();
+    let whole = run(&signal, signal.len());
+    assert_eq!(ended_windows(&whole).len(), 2);
+    for chunk_size in [1_000, 4_097, 22_050] {
+        assert_eq!(run(&signal, chunk_size), whole, "chunk size {chunk_size}");
+    }
+}
+
+#[test]
+fn a_steady_beat_never_splits() {
+    let signal = [beat(128.0, 90.0), silence(2.0)].concat();
+    let windows = ended_windows(&run(&signal, 2_205));
+
+    assert_eq!(windows.len(), 1);
+    assert_eq!(
+        reasons(&windows[0]),
+        (WindowStartReason::Sound, Some(WindowEndReason::Silence))
+    );
+}
+
+#[test]
+fn window_ids_keep_counting_after_a_split() {
+    let signal = [tempo_step(), beat(120.0, 10.0), silence(2.0)].concat();
+    let windows = ended_windows(&run(&signal, 2_205));
+
+    let ids: Vec<u32> = windows.iter().map(|window| window.id).collect();
+    assert_eq!(ids, [1, 2, 3]);
+    assert_eq!(
+        reasons(&windows[2]),
+        (WindowStartReason::Sound, Some(WindowEndReason::Silence))
+    );
+}
+
+#[test]
+fn silence_resets_the_change_detector() {
+    // Without the reset, the second window's 140 BPM would read as a change from the first's 120.
+    let signal = [
+        beat(120.0, 30.0),
+        silence(3.0),
+        beat(140.0, 30.0),
+        silence(2.0),
+    ]
+    .concat();
+    let windows = ended_windows(&run(&signal, 2_205));
+
+    assert_eq!(windows.len(), 2);
+    for window in &windows {
+        assert_eq!(
+            reasons(window),
+            (WindowStartReason::Sound, Some(WindowEndReason::Silence))
+        );
+    }
+}
+
+#[test]
+fn finish_after_a_split_ends_the_new_window() {
+    let mut session = Session::new(SAMPLE_RATE);
+    let mut events = session.push(&[beat(120.0, 30.0), beat(140.0, 30.0)].concat());
+    events.extend(session.finish());
+
+    let windows = ended_windows(&events);
+    assert_eq!(windows.len(), 2);
+    assert_eq!(
+        reasons(&windows[1]),
+        (WindowStartReason::Change, Some(WindowEndReason::Finished))
+    );
+    assert_analyzed_whole_window(&windows[1]);
+}
+
+/// 120 BPM fading into 90 BPM over a minute, then silence.
+fn slow_crossfade() -> Vec<f32> {
+    const SECONDS: f32 = 60.0;
+    let (old, new) = (beat(120.0, SECONDS), beat(90.0, SECONDS));
+    let length = old.len() as f32;
+    let mut signal: Vec<f32> = old
+        .iter()
+        .zip(&new)
+        .enumerate()
+        .map(|(index, (old, new))| {
+            let gain = index as f32 / length;
+            (1.0 - gain) * old + gain * new
+        })
+        .collect();
+    signal.extend(silence(2.0));
+    signal
+}
+
+#[test]
+fn a_slow_crossfade_splits_once() {
+    let windows = ended_windows(&run(&slow_crossfade(), 2_205));
+
+    let durations: Vec<f32> = windows
+        .iter()
+        .map(|window| window.duration_seconds)
+        .collect();
+    assert_eq!(windows.len(), 2, "window durations {durations:?}");
+    assert_eq!(
+        reasons(&windows[1]),
+        (WindowStartReason::Change, Some(WindowEndReason::Silence))
+    );
 }

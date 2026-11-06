@@ -71,7 +71,7 @@ fn start_from(sources: Vec<Source>, remembered: Option<&RememberedSource>) -> Op
     choose_start(StartChoice {
         listenables: &listenables,
         remembered,
-        wants_dev_source: false,
+        wanted_dev_source: None,
     })
     .map(|listenable| listenable.id().to_owned())
 }
@@ -81,7 +81,7 @@ fn start(remembered: Option<&RememberedSource>) -> Option<String> {
     choose_start(StartChoice {
         listenables: &listenables,
         remembered,
-        wants_dev_source: false,
+        wanted_dev_source: None,
     })
     .map(|listenable| listenable.id().to_owned())
 }
@@ -172,7 +172,7 @@ fn the_default_input_is_not_a_fallback() {
     let started = choose_start(StartChoice {
         listenables: &listenables,
         remembered: None,
-        wants_dev_source: false,
+        wanted_dev_source: None,
     });
 
     assert_eq!(started, None);
@@ -185,10 +185,10 @@ fn the_dev_override_beats_the_remembered_source() {
     let started = choose_start(StartChoice {
         listenables: &listenables,
         remembered: Some(&remembered_app("chrome.exe")),
-        wants_dev_source: true,
+        wanted_dev_source: Some(DevSource::TestBeat),
     });
 
-    assert_eq!(started, Some(Listenable::TestBeat));
+    assert_eq!(started, Some(Listenable::Dev(DevSource::TestBeat)));
 }
 
 #[test]
@@ -200,8 +200,8 @@ fn a_remembered_dev_source_falls_back_when_the_build_has_none() {
 
     let started = choose_start(StartChoice {
         listenables: &listenables,
-        remembered: Some(&remembered_device(DEV_SOURCE_ID)),
-        wants_dev_source: true,
+        remembered: Some(&remembered_device(DevSource::TestBeat.id())),
+        wanted_dev_source: Some(DevSource::TestBeat),
     });
 
     assert_eq!(started.as_ref().map(Listenable::id), Some("headphones"));
@@ -212,7 +212,7 @@ fn only_apps_and_outputs_are_watched_for_silence() {
     assert!(Listenable::Capture(app("chrome")).watches_for_silence());
     assert!(Listenable::Capture(device("speakers", false)).watches_for_silence());
     assert!(!Listenable::Capture(mic("mic")).watches_for_silence());
-    assert!(!Listenable::TestBeat.watches_for_silence());
+    assert!(!Listenable::Dev(DevSource::TestBeat).watches_for_silence());
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn a_device_has_kind_device() {
 #[test]
 fn the_dev_source_matches_the_contract() {
     assert_eq!(
-        serde_json::to_value(Listenable::TestBeat.to_dto()).expect("serializes"),
+        serde_json::to_value(Listenable::Dev(DevSource::TestBeat).to_dto()).expect("serializes"),
         json!({
             "id": "dev:test-beat",
             "kind": "device",
@@ -265,4 +265,30 @@ fn the_dev_source_matches_the_contract() {
             "isOutput": false,
         })
     );
+}
+
+#[test]
+fn the_dev_override_can_start_the_test_mix() {
+    let listenables = sample_listenables();
+
+    let started = choose_start(StartChoice {
+        listenables: &listenables,
+        remembered: None,
+        wanted_dev_source: Some(DevSource::TestMix),
+    });
+
+    assert_eq!(started.as_ref().map(Listenable::id), Some("dev:test-mix"));
+}
+
+#[test]
+fn dev_sources_are_named_by_their_variable_value() {
+    assert_eq!(
+        DevSource::from_variable("test-beat"),
+        Some(DevSource::TestBeat)
+    );
+    assert_eq!(
+        DevSource::from_variable("test-mix"),
+        Some(DevSource::TestMix)
+    );
+    assert_eq!(DevSource::from_variable("dev:test-mix"), None);
 }

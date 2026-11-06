@@ -46,6 +46,11 @@ const CUSUM_HALF_SECONDS: f32 = 1.5;
 const RECENT_TICKS: usize = ticks(RECENT_SECONDS);
 const SUSTAIN_TICKS: usize = ticks(SUSTAIN_SECONDS);
 
+/// How far before the estimate that reports a change its change point can be: the lookback before
+/// the run of disagreement, plus the run.
+pub(crate) const MAX_CHANGE_AGE_SECONDS: f32 =
+    LOOKBACK_SECONDS + (SUSTAIN_TICKS - 1) as f32 * ESTIMATE_INTERVAL_SECONDS;
+
 const fn ticks(seconds: f32) -> usize {
     (seconds / ESTIMATE_INTERVAL_SECONDS) as usize
 }
@@ -81,7 +86,7 @@ struct WindowTempo {
 ///
 /// A split needs the last 6 s of onsets to show a confident beat (≥ 0.6) that isn't the window's
 /// earlier beat (≥ 0.5 confident, from at least 8 s of audio) at 1×, 2× or ½× within 4%, for 4 s
-/// in a row.
+/// in a row, and a point in the lookback where the onsets start fitting the new beat better.
 pub struct ChangeDetector {
     /// The window's tempo at each of the last `RECENT_TICKS + 1` estimates, oldest first: the
     /// front is the window's beat from just before the recent stretch.
@@ -151,7 +156,7 @@ impl ChangeDetector {
             now_seconds: estimate.seconds_analyzed,
             old_bpm,
             new_bpm,
-        });
+        })?;
         self.reset();
         Some(TempoChange {
             at_seconds,
@@ -180,7 +185,11 @@ impl ChangeDetector {
     /// Where onsets start fitting the new beat period better than the old one: the candidate time
     /// (on the estimate grid) that maximizes the suffix sum (CUSUM) of
     /// `autocorrelation(new period) − autocorrelation(old period)` from there to now.
-    fn change_point(&mut self, input: ChangePointInput) -> f32 {
+    ///
+    /// `None` when that maximum is the earliest candidate: the new beat fits better all the way
+    /// back, so the beats disagree because the window's tempo was misread (an ambiguous beat, or
+    /// the old song still fading out), not because a new song began.
+    fn change_point(&mut self, input: ChangePointInput) -> Option<f32> {
         let ChangePointInput {
             analyzer,
             now_seconds,
@@ -197,13 +206,14 @@ impl ChangeDetector {
         let new_lag = 60.0 / new_bpm * frame_rate;
         let half = (CUSUM_HALF_SECONDS * frame_rate) as usize;
 
-        let run_start = now_seconds - (SUSTAIN_TICKS - 1) as f32 * ESTIMATE_INTERVAL_SECONDS;
-        let earliest = (run_start - LOOKBACK_SECONDS).max(MIN_CHANGE_SECONDS);
+        let earliest = (now_seconds - MAX_CHANGE_AGE_SECONDS).max(MIN_CHANGE_SECONDS);
         let mut suffix = 0.0;
         let mut best_sum = f32::NEG_INFINITY;
         let mut best = now_seconds;
         let mut candidate = now_seconds;
+        let mut earliest_searched = now_seconds;
         while candidate >= earliest - ESTIMATE_INTERVAL_SECONDS / 2.0 {
+            earliest_searched = candidate;
             let center = frame_of(candidate);
             let from = center.saturating_sub(half).min(self.onsets.len());
             let to = (center + half).min(self.onsets.len());
@@ -215,7 +225,8 @@ impl ChangeDetector {
             }
             candidate -= ESTIMATE_INTERVAL_SECONDS;
         }
-        best
+        let has_turning_point = best != earliest_searched;
+        has_turning_point.then_some(best)
     }
 }
 

@@ -9,9 +9,11 @@ mod key;
 pub mod rhythm;
 pub mod segment;
 mod session;
+#[cfg(test)]
+mod test_audio;
 pub mod tonal;
 
 pub use analyzer::{Analyzer, Estimate};
 pub use change::{ChangeDetector, Observation, TempoChange};
 pub use key::{Key, Mode, PitchClass};
-pub use session::{Session, SessionEvent};
+pub use session::{Session, SessionEvent, WindowEndReason, WindowStartReason};

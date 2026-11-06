@@ -27,11 +27,47 @@ fn window_started_is_tagged_camel_case() {
     let event = SessionEvent::WindowStarted {
         window_id: 3,
         at_seconds: 1.5,
+        reason: WindowStartReason::Sound,
     };
     assert_eq!(
         to_json(event),
-        json!({ "type": "windowStarted", "windowId": 3, "atSeconds": 1.5 })
+        json!({ "type": "windowStarted", "windowId": 3, "atSeconds": 1.5, "reason": "sound" })
     );
+}
+
+#[test]
+fn start_reasons_are_camel_case() {
+    let reasons = [
+        (WindowStartReason::Sound, "sound"),
+        (WindowStartReason::Change, "change"),
+    ];
+    for (reason, expected) in reasons {
+        let event = SessionEvent::WindowStarted {
+            window_id: 1,
+            at_seconds: 0.0,
+            reason,
+        };
+        assert_eq!(to_json(event)["reason"], expected);
+    }
+}
+
+#[test]
+fn end_reasons_are_camel_case() {
+    let reasons = [
+        (WindowEndReason::Silence, "silence"),
+        (WindowEndReason::Change, "change"),
+        (WindowEndReason::Finished, "finished"),
+    ];
+    for (reason, expected) in reasons {
+        let event = SessionEvent::WindowEnded {
+            window_id: 1,
+            estimate: None,
+            duration_seconds: 5.0,
+            too_short: false,
+            reason,
+        };
+        assert_eq!(to_json(event)["reason"], expected);
+    }
 }
 
 #[test]
@@ -80,6 +116,7 @@ fn window_ended_without_an_estimate_sends_null() {
         estimate: None,
         duration_seconds: 2.0,
         too_short: true,
+        reason: WindowEndReason::Silence,
     };
     assert_eq!(
         to_json(event),
@@ -89,6 +126,7 @@ fn window_ended_without_an_estimate_sends_null() {
             "estimate": null,
             "durationSeconds": 2.0,
             "tooShort": true,
+            "reason": "silence",
         })
     );
 }
