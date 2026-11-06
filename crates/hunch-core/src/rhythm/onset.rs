@@ -57,6 +57,8 @@ pub struct OnsetEnvelopes {
     has_previous: bool,
     history: VecDeque<OnsetFrame>,
     history_capacity: usize,
+    /// Frames added to `history` since the last reset, including those since dropped.
+    frames_kept: u64,
 }
 
 impl OnsetEnvelopes {
@@ -80,6 +82,7 @@ impl OnsetEnvelopes {
             has_previous: false,
             history: VecDeque::with_capacity(history_capacity),
             history_capacity,
+            frames_kept: 0,
         }
     }
 
@@ -98,6 +101,13 @@ impl OnsetEnvelopes {
         &self.history
     }
 
+    /// Seconds since the last reset at which the STFT window of `history`'s first frame starts.
+    pub fn history_start_seconds(&self) -> f32 {
+        // STFT frame 0 is never kept, so the oldest kept frame is STFT frame `dropped + 1`.
+        let dropped = self.frames_kept - self.history.len() as u64;
+        (dropped + 1) as f32 / self.frame_rate
+    }
+
     pub fn push(&mut self, samples: &[f32]) {
         let Self {
             stft,
@@ -107,6 +117,7 @@ impl OnsetEnvelopes {
             has_previous,
             history,
             history_capacity,
+            frames_kept,
             ..
         } = self;
 
@@ -126,6 +137,7 @@ impl OnsetEnvelopes {
                 history.pop_front();
             }
             history.push_back(frame);
+            *frames_kept += 1;
         });
     }
 
@@ -134,6 +146,7 @@ impl OnsetEnvelopes {
         self.previous_log_spectrum.fill(0.0);
         self.has_previous = false;
         self.history.clear();
+        self.frames_kept = 0;
     }
 }
 

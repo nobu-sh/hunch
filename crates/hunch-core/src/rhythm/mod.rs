@@ -14,7 +14,9 @@ mod periodicity;
 mod repetition;
 
 use self::features::{BeatEvidence, EvidenceInput, FEATURE_COUNT, FEATURE_NAMES};
-use self::onset::{Band, OnsetEnvelopes};
+use std::collections::VecDeque;
+
+use self::onset::{Band, OnsetEnvelopes, OnsetFrame};
 use self::periodicity::{LagRange, Period, bpm_to_lag, lag_to_bpm, strongest_periods};
 use self::repetition::{Repetition, RepetitionFinder};
 
@@ -103,6 +105,31 @@ pub struct OctaveCandidate {
     pub features: Vec<f32>,
 }
 
+/// The onset envelope history, placed on the clock of audio pushed since the last reset.
+pub(crate) struct OnsetTimeline<'a> {
+    frames: &'a VecDeque<OnsetFrame>,
+    /// When the first frame's analysis window starts, in seconds.
+    start_seconds: f32,
+    frame_rate: f32,
+}
+
+impl OnsetTimeline<'_> {
+    pub(crate) fn frame_rate(&self) -> f32 {
+        self.frame_rate
+    }
+
+    pub(crate) fn start_seconds(&self) -> f32 {
+        self.start_seconds
+    }
+
+    /// The all-band (`Band::Combined`) onset strength per frame, oldest first.
+    pub(crate) fn combined(&self) -> impl Iterator<Item = f32> + '_ {
+        self.frames
+            .iter()
+            .map(|frame| frame[Band::Combined.index()])
+    }
+}
+
 /// Streaming tempo detector. Accumulates evidence over the last ~30 s pushed since the last reset.
 pub struct TempoDetector {
     onsets: OnsetEnvelopes,
@@ -139,11 +166,20 @@ impl TempoDetector {
         estimate_from(self.octave_analysis())
     }
 
-    /// Experimental, for `hunch-eval mix-bench`: the estimate from only the last `seconds` of
-    /// onset history, so a new beat shows before the full history turns over.
+    /// The estimate from only the last `seconds` of onset history, so a new beat shows before the
+    /// full history turns over. The change detector compares it with the window's estimate.
     pub fn estimate_recent(&self, seconds: f32) -> TempoEstimate {
         let frames = (seconds.max(0.0) * self.onsets.frame_rate()).round() as usize;
         estimate_from(self.analysis_of_last(frames))
+    }
+
+    /// The all-band onset envelope over the kept history (the last ~30 s), for locating a change.
+    pub(crate) fn combined_onsets(&self) -> OnsetTimeline<'_> {
+        OnsetTimeline {
+            frames: self.onsets.history(),
+            start_seconds: self.onsets.history_start_seconds(),
+            frame_rate: self.onsets.frame_rate(),
+        }
     }
 
     /// The candidates behind the current estimate, related by tempo octave.

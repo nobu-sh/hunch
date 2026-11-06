@@ -1,10 +1,17 @@
 //! The detector configs the bench sweeps, each with a name that says what it is.
 
 use super::detect::{Approach, FeatureSet, Gate, GridRule, NoveltyRule, RecentRule, TempoCheck};
+use super::production;
 use super::trace::RECENT_TEMPO_SECONDS;
 
 /// Name prefixes of the approach families, in the order they're reported.
-pub const FAMILIES: [&str; 4] = ["recent", "novelty", "gated-novelty", "grid"];
+pub const FAMILIES: [&str; 5] = [
+    "recent",
+    "novelty",
+    "gated-novelty",
+    "grid",
+    production::CONFIG,
+];
 
 /// The exploration's pick: split when the last 6 s of onsets confidently show a different beat.
 pub const RECOMMENDED_CONFIG: &str = "grid tempo6s@0.6 nophase n4s";
@@ -60,6 +67,7 @@ pub fn all_configs() -> Vec<(String, Approach)> {
     let mut configs = recent_configs();
     configs.extend(novelty_configs());
     configs.extend(grid_configs());
+    configs.push((production::CONFIG.to_string(), Approach::Core));
     configs
 }
 

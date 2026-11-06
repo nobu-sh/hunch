@@ -3,7 +3,7 @@ use crate::rhythm::TempoDetector;
 use crate::tonal::{KeyDetector, KeyDetectorConfig};
 
 /// How much newly pushed audio, in seconds, is needed before the next estimate.
-const ESTIMATE_INTERVAL_SECONDS: f32 = 0.5;
+pub(crate) const ESTIMATE_INTERVAL_SECONDS: f32 = 0.5;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Estimate {
@@ -87,8 +87,7 @@ impl Analyzer {
         &mut self.key
     }
 
-    /// Experimental, for `hunch-eval mix-bench`: lets it read recent tempo estimates
-    /// (`TempoDetector::estimate_recent`).
+    /// The tempo detector, for recent tempo estimates (`TempoDetector::estimate_recent`).
     pub fn tempo_detector(&self) -> &TempoDetector {
         &self.tempo
     }
