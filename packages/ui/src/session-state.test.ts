@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Estimate, SessionEvent } from './estimate';
+import type { Estimate, SessionEvent, WindowStartReason } from './estimate';
+import { isBpmLocked } from './lock';
 import {
   HISTORY_LIMIT,
   RECENT_ESTIMATES_LIMIT,
@@ -31,10 +32,11 @@ function apply(state: SessionState, ...events: SessionEvent[]): SessionState {
   return events.reduce((next, event) => applySessionEvent({ state: next, event, now: NOW }), state);
 }
 
-const started = (windowId: number): SessionEvent => ({
+const started = (windowId: number, reason: WindowStartReason = 'sound'): SessionEvent => ({
   type: 'windowStarted',
   windowId,
   atSeconds: 0,
+  reason,
 });
 
 const ended = (
@@ -46,6 +48,7 @@ const ended = (
   estimate: estimate(),
   durationSeconds: 30,
   tooShort: false,
+  reason: 'silence',
   ...overrides,
 });
 
@@ -129,6 +132,31 @@ describe('applySessionEvent', () => {
     expect(state.window?.windowId).toBe(2);
     expect(state.window?.hasEnded).toBe(false);
     expect(state.history).toHaveLength(1);
+  });
+
+  it('splits on a tempo change: a history row for the old song, a fresh window for the new', () => {
+    const old = estimate({ bpm: 120 });
+    const burst = [140, 140, 140].map((bpm): SessionEvent => ({
+      type: 'estimate',
+      windowId: 2,
+      estimate: estimate({ bpm }),
+    }));
+
+    const state = apply(
+      createSessionState(TAB_ID),
+      started(1),
+      ended(1, { estimate: old, reason: 'change' }),
+      started(2, 'change'),
+      ...burst,
+    );
+
+    expect(state.history).toEqual([
+      { windowId: 1, endedAt: NOW, durationSeconds: 30, estimate: old },
+    ]);
+    expect(state.window?.windowId).toBe(2);
+    expect(state.window?.recentEstimates.map((value) => value.bpm)).toEqual([140, 140, 140]);
+    // The re-analyzed estimates arrive together, so the new window can lock right away.
+    expect(isBpmLocked(state.window?.recentEstimates ?? [])).toBe(true);
   });
 });
 

@@ -17,9 +17,9 @@ export interface Estimate {
 }
 
 export type SessionEvent =
-  | { type: 'windowStarted'; windowId: number; atSeconds: number }
+  | { type: 'windowStarted'; windowId: number; atSeconds: number; reason: 'sound' | 'change' }
   | { type: 'estimate'; windowId: number; estimate: Estimate }
-  | { type: 'windowEnded'; windowId: number; estimate: Estimate | null; durationSeconds: number; tooShort: boolean };
+  | { type: 'windowEnded'; windowId: number; estimate: Estimate | null; durationSeconds: number; tooShort: boolean; reason: 'silence' | 'change' | 'finished' };
 "#;
 
 #[wasm_bindgen]
